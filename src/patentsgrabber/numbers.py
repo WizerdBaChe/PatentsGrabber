@@ -52,6 +52,39 @@ class ParsedNumber:
     def supported(self) -> bool:
         return self.kind_of_document in ("publication", "grant")
 
+    # ---- EPO OPS input formats -------------------------------------------
+    # These two rules were established empirically against the live API on
+    # 2026-08-23 (see tests/test_ops_number_formats.py); both are counter-
+    # intuitive and neither is stated plainly in the public docs:
+    #   epodoc MUST NOT carry the kind code  -> US6285999B1 answers 404
+    #   docdb  MUST use the 6-digit serial   -> US.20250383260.A1 answers 404
+    # The Espacenet display form (US2025383260A1) is valid as NEITHER.
+
+    @property
+    def ops_body(self) -> str:
+        """Country-less number body as OPS wants it: year+6-digit, or the grant serial."""
+        if self.kind_of_document == "publication":
+            return f"{self.year}{self.serial.lstrip('0').zfill(6)}"
+        return self.serial
+
+    @property
+    def epodoc(self) -> str:
+        """epodoc input format — no kind code."""
+        return f"{self.country}{self.ops_body}"
+
+    def docdb(self, kind: str | None = None) -> str:
+        """docdb input format — country.number.kind, kind required."""
+        k = kind or self.kind_code or (US_PUB_KINDS if self.kind_of_document == "publication"
+                                       else US_GRANT_KINDS)[0]
+        return f"{self.country}.{self.ops_body}.{k}"
+
+    def docdb_candidates(self) -> list[str]:
+        """docdb forms to try in order when the kind code was not supplied."""
+        if self.kind_code:
+            return [self.docdb(self.kind_code)]
+        kinds = US_PUB_KINDS if self.kind_of_document == "publication" else US_GRANT_KINDS
+        return [self.docdb(k) for k in kinds]
+
 
 def _split_kind(token: str) -> tuple[str, str | None]:
     """Peel a trailing kind code off an alphanumeric token."""

@@ -6,9 +6,11 @@ bearer token valid for ~20 minutes. The token is cached and refreshed a minute
 early rather than on failure, so a request never fails for a reason we could
 have prevented.
 
-BR-6 (docs/01-concept-note.md): the free tier's real ceiling is a fair-use
-4 GB/week, so this client tracks bytes served and surfaces the quota headers OPS
-returns instead of discovering the limit by hitting it.
+BR-6 (docs/01-concept-note.md): OPS reports its own accounting on every
+response — x-registeredquotaperweek-used, x-individualquotaperhour-used and
+x-throttling-control with per-service request allowances. Those counters are
+authoritative and are what this client surfaces; no threshold is hard-coded,
+because the Fair use charter defines it and the EPO may change it (T&C 3.3, 9).
 
 Nothing here logs or returns the credential; see config.OpsConfig.describe().
 """
@@ -16,6 +18,7 @@ Nothing here logs or returns the credential; see config.OpsConfig.describe().
 from __future__ import annotations
 
 import base64
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -67,20 +70,72 @@ class Usage:
     week: str = field(default_factory=gmt_week)
     requests: int = 0
     bytes_served: int = 0
-    last_throttle: str | None = None          # OPS X-Throttling-Control header
-    last_quota_headers: dict[str, str] = field(default_factory=dict)
+
+    # OPS reports its OWN accounting on every response. These are authoritative
+    # where our local tally is only an estimate, so they are what we act on.
+    server_week_used: int | None = None        # x-registeredquotaperweek-used (bytes)
+    server_hour_used: int | None = None        # x-individualquotaperhour-used (bytes)
+    system_state: str | None = None            # idle | busy | overloaded
+    per_service: dict[str, tuple[str, int]] = field(default_factory=dict)
 
     def record(self, nbytes: int) -> None:
         current = gmt_week()
-        if current != self.week:            # a new GMT week resets the meter
+        if current != self.week:            # a new GMT week resets the local meter
             self.week, self.requests, self.bytes_served = current, 0, 0
         self.requests += 1
         self.bytes_served += nbytes
 
+    def absorb_headers(self, headers) -> None:
+        """Prefer the service's own counters over ours wherever it reports them."""
+        low = {k.lower(): v for k, v in headers.items()}
+        for attr, name in (("server_week_used", "x-registeredquotaperweek-used"),
+                           ("server_hour_used", "x-individualquotaperhour-used")):
+            raw = low.get(name)
+            if raw and raw.strip().isdigit():
+                setattr(self, attr, int(raw.strip()))
+        ctl = low.get("x-throttling-control")
+        if ctl:
+            self.system_state = ctl.split("(")[0].strip() or None
+            # e.g. "idle (images=green:200, search=green:30, ...)"
+            for part in re.findall(r"(\w+)=(\w+):(\d+)", ctl):
+                service, colour, per_min = part
+                self.per_service[service] = (colour, int(per_min))
+
+    def allowance(self, service: str) -> int | None:
+        """Requests per minute OPS currently permits for a service, if it said."""
+        hit = self.per_service.get(service)
+        return hit[1] if hit else None
+
     def summary(self) -> str:
         mb = self.bytes_served / 1_048_576
-        return (f"{self.requests} requests, {mb:.2f} MB in GMT week {self.week}"
-                + (f" | throttle: {self.last_throttle}" if self.last_throttle else ""))
+        out = [f"{self.requests} requests, {mb:.2f} MB this session (GMT week {self.week})"]
+        if self.server_week_used is not None:
+            out.append(f"EPO week counter: {self.server_week_used / 1_048_576:.1f} MB")
+        if self.server_hour_used is not None:
+            out.append(f"EPO hour counter: {self.server_hour_used / 1_048_576:.1f} MB")
+        if self.system_state:
+            svc = ", ".join(f"{k}={v[0]}:{v[1]}/min" for k, v in sorted(self.per_service.items()))
+            out.append(f"OPS is {self.system_state} [{svc}]")
+        return " | ".join(out)
+
+
+def _walk(node, key):
+    """Collect every value stored under `key`, at any depth, in OPS's JSON.
+
+    OPS JSON marks XML attributes as "@name" and text content as "$", and
+    namespaces keys as "ops:thing" / "ns:thing" — so a plain dict lookup finds
+    almost nothing. Matching on the suffix is what makes the payload usable.
+    """
+    out = []
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k == key or k.endswith(":" + key) or k == "@" + key:
+                out.append(v.get("$", v) if isinstance(v, dict) else v)
+            out.extend(_walk(v, key))
+    elif isinstance(node, list):
+        for item in node:
+            out.extend(_walk(item, key))
+    return out
 
 
 class OpsClient:
@@ -132,11 +187,7 @@ class OpsClient:
             params=params,
         )
         self.usage.record(len(r.content))
-        if "X-Throttling-Control" in r.headers:
-            self.usage.last_throttle = r.headers["X-Throttling-Control"]
-        self.usage.last_quota_headers = {
-            k: v for k, v in r.headers.items() if "quota" in k.lower() or "throttl" in k.lower()
-        }
+        self.usage.absorb_headers(r.headers)
 
         if r.status_code == 403:
             raise OpsError("OPS 回 403 — 可能是配額用盡或此服務未授權給你的帳號。",
@@ -201,6 +252,39 @@ class OpsClient:
         """CQL search. Applicant is `pa=`, inventor `in=`, title+abstract `ta=`."""
         return self.get("published-data/search",
                         params={"q": cql, "Range": f"{start}-{end}"})
+
+    def resolve(self, parsed) -> tuple[str, str]:
+        """Find an input format OPS actually accepts for this number.
+
+        Order matters and is empirical (2026-08-23): docdb with the kind code is
+        the precise form, so it is tried first; epodoc without a kind code is the
+        fallback; number-service is the last resort because it costs an extra
+        call but can translate a form the data endpoints reject.
+
+        Returns (format, number). Raises OpsError if nothing resolves.
+        """
+        for candidate in parsed.docdb_candidates():
+            try:
+                self.biblio(candidate, fmt="docdb")
+                return ("docdb", candidate)
+            except OpsError as exc:
+                if exc.status != 404:
+                    raise
+        try:
+            self.biblio(parsed.epodoc, fmt="epodoc")
+            return ("epodoc", parsed.epodoc)
+        except OpsError as exc:
+            if exc.status != 404:
+                raise
+        # Last resort: let OPS translate the display form it does accept here.
+        conv = self.number_convert(parsed.espacenet, from_fmt="epodoc", to_fmt="docdb")
+        body = "".join(str(v) for v in _walk(conv, "doc-number"))
+        kind = "".join(str(v) for v in _walk(conv, "kind"))
+        if body:
+            num = f"{parsed.country}.{body}.{kind or parsed.kind_code or 'A1'}"
+            self.biblio(num, fmt="docdb")
+            return ("docdb", num)
+        raise OpsError(f"OPS 無法解析號碼 {parsed.raw!r}（已試 docdb、epodoc 與 number-service）")
 
     def close(self) -> None:
         self._client.close()
