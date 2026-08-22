@@ -1,0 +1,38 @@
+# ---------------------------------------------------------------------------
+# Secrets — nothing here may ever enter a commit.
+# This block exists before the repo did: .gitignore was written and git init run
+# BEFORE any credential file was created, so no key was ever committable.
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+credentials.json
+secrets.json
+token.json
+
+# ---------------------------------------------------------------------------
+# Local data and run artifacts (regenerable; see tools/probe_coverage.py)
+# ---------------------------------------------------------------------------
+var/
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# ---------------------------------------------------------------------------
+# OS / editor noise
+# ---------------------------------------------------------------------------
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/

@@ -1,0 +1,7 @@
+#!/bin/sh
+# Versioned hook (core.hooksPath = .githooks), so it travels with the repo
+# instead of living only in one machine's .git/hooks.
+#
+# Exit 2 from the checker means it could not run — treated as a failure, because
+# a scanner that did not scan must never read as "clean".
+python tools/check_secrets.py || exit 1
