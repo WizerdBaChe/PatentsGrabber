@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PatentsGrabber</title>
+<style>
+  :root{
+    --bg:#f7f7f5; --panel:#ffffff; --ink:#1b1b19; --muted:#6b6b66; --line:#e2e2dd;
+    --accent:#2f5d50; --accent-soft:#e6efeb; --warn:#8a5a1a; --warn-soft:#fdf3e3;
+    --figbg:#ffffff;
+    --mono:ui-monospace,"Cascadia Mono",Consolas,monospace;
+    --split:55;              /* text pane percentage; persisted */
+  }
+  @media (prefers-color-scheme:dark){
+    :root{ --bg:#141519; --panel:#1c1d21; --ink:#e8e8e4; --muted:#9a9a94; --line:#2f3036;
+           --accent:#7fc0aa; --accent-soft:#22312c; --warn:#e0b072; --warn-soft:#33291a;
+           --figbg:#f2f2ee; }
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);overflow:hidden;
+       font:15px/1.65 "Noto Sans TC",-apple-system,"Segoe UI",system-ui,sans-serif;
+       display:flex;flex-direction:column;height:100dvh}
+
+  /* ---------- zone 1: search ---------- */
+  .searchbar{display:flex;gap:10px;align-items:center;padding:10px 16px;
+             background:var(--panel);border-bottom:1px solid var(--line);flex:0 0 auto}
+  .brand{font-weight:700;white-space:nowrap;font-size:15px}
+  .brand small{display:block;font-weight:400;color:var(--muted);font-size:10.5px;letter-spacing:.02em}
+  input[type=text]{flex:1;min-width:0;padding:9px 13px;border:1px solid var(--line);border-radius:8px;
+                   background:var(--bg);color:var(--ink);font-size:14px;font-family:var(--mono)}
+  button{padding:9px 15px;border:1px solid transparent;border-radius:8px;background:var(--accent);
+         color:#fff;font-size:14px;cursor:pointer;font-family:inherit}
+  button.ghost{background:transparent;color:var(--ink);border-color:var(--line)}
+  button:disabled{opacity:.5;cursor:progress}
+
+  /* ---------- zone 2: document bar (secondary info lives here as triggers) ---------- */
+  .docbar{flex:0 0 auto;background:var(--panel);border-bottom:1px solid var(--line);padding:9px 16px}
+  .titleline{display:flex;align-items:baseline;gap:10px;margin-bottom:7px}
+  .titleline h1{font-size:16px;font-weight:600;margin:0;line-height:1.45;
+                overflow:hidden;text-overflow:ellipsis;display:-webkit-box;
+                -webkit-line-clamp:1;-webkit-box-orient:vertical;cursor:pointer}
+  .titleline h1.open{-webkit-line-clamp:5}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  .chip{font-size:12px;padding:3.5px 10px;border-radius:20px;border:1px solid var(--line);
+        background:transparent;color:var(--muted);font-family:inherit;cursor:default;
+        display:inline-flex;align-items:center;gap:5px;line-height:1.4}
+  .chip b{color:var(--ink);font-weight:600;font-family:var(--mono);font-size:11.5px}
+  .chip.id{font-family:var(--mono);background:var(--accent-soft);color:var(--accent);border-color:transparent}
+  .chip.state{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+  button.chip{cursor:pointer}
+  button.chip:hover{border-color:var(--accent);color:var(--ink)}
+  button.chip[aria-expanded=true]{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+  .chip.warn{background:var(--warn-soft);color:var(--warn);border-color:transparent}
+  .chip.zero{opacity:.45}
+  .sep{width:1px;height:18px;background:var(--line);margin:0 3px}
+
+  /* ---------- zone 3: reading area (everything else is a popover) ---------- */
+  .reader{flex:1 1 auto;display:flex;min-height:0}
+  .pane{display:flex;flex-direction:column;min-width:0;min-height:0}
+  .pane.text{flex:0 0 calc(var(--split) * 1%)}
+  .pane.figs{flex:1 1 auto;border-left:1px solid var(--line)}
+  .tabs{display:flex;gap:2px;padding:8px 12px 0;flex:0 0 auto}
+  .tabs button{background:transparent;color:var(--muted);border:none;border-bottom:2px solid transparent;
+               border-radius:6px 6px 0 0;padding:7px 13px;font-size:13.5px}
+  .tabs button.on{color:var(--ink);border-bottom-color:var(--accent);font-weight:600}
+  .tabs .spacer{flex:1}
+  .tabs .note{color:var(--muted);font-size:11.5px;align-self:center;padding-right:4px;font-family:var(--mono)}
+  .body{flex:1 1 auto;overflow:auto;padding:6px 20px 28px;min-height:0}
+  .prose{white-space:pre-wrap;max-width:78ch}
+  .claim{padding:11px 13px;border:1px solid var(--line);border-radius:9px;margin-bottom:9px;max-width:78ch}
+  .claim.indep{border-color:var(--accent);background:var(--accent-soft)}
+  .claim .tag{font-size:11px;font-family:var(--mono);color:var(--accent);font-weight:700;margin-bottom:3px}
+  .claim.dep{opacity:.9}
+  details.deps summary{cursor:pointer;color:var(--muted);font-size:13px;margin:12px 0 10px}
+
+  /* splitter */
+  .split{flex:0 0 7px;cursor:col-resize;background:transparent;position:relative}
+  .split::after{content:"";position:absolute;inset:0 3px;background:var(--line)}
+  .split:hover::after,.split.drag::after{background:var(--accent)}
+
+  /* figures */
+  .figtop{flex:1 1 auto;display:flex;align-items:center;justify-content:center;
+          background:var(--figbg);overflow:auto;min-height:0;position:relative}
+  .figtop img{max-width:100%;max-height:100%;display:block;cursor:zoom-in}
+  .figtop img.zoom{max-width:none;max-height:none;width:210%;cursor:zoom-out}
+  .figempty{color:var(--muted);font-size:13px;padding:26px;text-align:center;max-width:44ch;line-height:1.8}
+  .figbar{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:6px 10px;
+          border-top:1px solid var(--line);background:var(--panel)}
+  .figbar .n{font-family:var(--mono);font-size:12px;color:var(--muted);white-space:nowrap}
+  .figbar button{padding:4px 9px;font-size:13px;background:transparent;color:var(--ink);border-color:var(--line)}
+  .thumbs{display:flex;gap:5px;overflow-x:auto;flex:1;padding:2px 0}
+  .thumbs img{height:52px;border:2px solid transparent;border-radius:4px;background:#fff;
+              cursor:pointer;flex:0 0 auto}
+  .thumbs img.on{border-color:var(--accent)}
+
+  /* ---------- popovers: the home of all secondary information ---------- */
+  [popover]{margin:0;padding:0;border:1px solid var(--line);border-radius:11px;
+            background:var(--panel);color:var(--ink);
+            width:max-content;max-width:min(660px,92vw);max-height:min(66dvh,620px);overflow:auto;
+            box-shadow:0 14px 44px rgba(0,0,0,.30);
+            position-area:bottom span-right;position-try-fallbacks:flip-block,flip-inline;
+            margin-top:7px}
+  @supports not (position-area:bottom){
+    [popover]{position:fixed;top:50%;left:50%;translate:-50% -50%;margin:0}
+  }
+  [popover]::backdrop{background:rgba(0,0,0,.12)}
+  .pop-h{position:sticky;top:0;background:var(--panel);border-bottom:1px solid var(--line);
+         padding:11px 15px;font-size:12px;text-transform:uppercase;letter-spacing:.07em;
+         color:var(--muted);font-weight:600;z-index:1}
+  .pop-b{padding:12px 15px 15px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em}
+  tr:last-child td{border-bottom:none}
+  .mono{font-family:var(--mono);font-size:12px}
+  dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:13.5px}
+  dt{color:var(--muted);white-space:nowrap}
+  dd{margin:0}
+  .trunc{color:var(--warn);font-size:12px;margin-top:9px;padding-top:8px;border-top:1px dashed var(--line)}
+  .reason{font-size:13px;color:var(--muted);margin:0 0 8px}
+  .reason code{font-family:var(--mono);color:var(--warn);font-size:12px}
+  .ok{color:var(--accent)}
+  a{color:var(--accent)}
+  .poplinks{display:flex;flex-direction:column;gap:9px;font-size:14px}
+
+  /* welcome / error */
+  .center{flex:1 1 auto;display:flex;align-items:center;justify-content:center;padding:30px}
+  .box{max-width:620px;background:var(--panel);border:1px solid var(--line);
+       border-radius:12px;padding:22px 26px}
+  .box.err{border-color:var(--warn);background:var(--warn-soft)}
+  .box h2{margin:0 0 12px;font-size:15px}
+  .box p{margin:0 0 10px;font-size:13.5px;color:var(--muted)}
+  .fmt{font-family:var(--mono);font-size:12.5px;color:var(--ink);line-height:2}
+  .fmt span{background:var(--bg);border:1px solid var(--line);border-radius:5px;
+            padding:2px 8px;margin-right:6px;cursor:pointer;display:inline-block}
+  .fmt span:hover{border-color:var(--accent)}
+</style>
+</head>
+<body>
+
+<div class="searchbar">
+  <div class="brand">PatentsGrabber<small>Stage 0 · US · Google Patents</small></div>
+  <input id="q" type="text" placeholder="US20250383260A1 · US 2025/0383260 A1 · 6,285,999" autofocus>
+  <button id="go">查詢</button>
+  <button id="refresh" class="ghost" title="略過本地庫，重新抓取">重抓</button>
+  <button class="chip" id="libchip" popovertarget="pop-lib">庫 <b>0</b></button>
+</div>
+
+<div id="docbar" class="docbar" style="display:none"></div>
+<div id="stage" class="reader"></div>
+<div id="pops"></div>
+
+<div id="pop-lib" popover>
+  <div class="pop-h">本地專利庫</div>
+  <div class="pop-b" id="libbody"></div>
+</div>
+
+<script>
+const $  = s => document.querySelector(s);
+const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let CARD = null, figIndex = 0;
+
+/* ---------------- popover plumbing ---------------- */
+// Native popover + CSS anchor positioning: light-dismiss, top layer and placement
+// all come from the browser. Anchor names are assigned per trigger at render time.
+let popSeq = 0;
+function makePop(triggerLabel, title, bodyHTML, opts={}){
+  const id = `pop-${++popSeq}`, anchor = `--a${popSeq}`;
+  const cls = ['chip', opts.warn ? 'warn' : '', opts.zero ? 'zero' : ''].filter(Boolean).join(' ');
+  // The count lives in a <b>, which some AT flattens away — restate it in the label.
+  const aria = esc(`${triggerLabel.replace(/<[^>]+>/g, '')}｜${title}`);
+  const chip = `<button class="${cls}" popovertarget="${id}" data-anchor="${anchor}" aria-label="${aria}">${triggerLabel}</button>`;
+  const pop  = `<div id="${id}" popover data-anchor="${anchor}">
+      <div class="pop-h">${esc(title)}</div><div class="pop-b">${bodyHTML}</div></div>`;
+  return {chip, pop};
+}
+function wireAnchors(){
+  document.querySelectorAll('[data-anchor]').forEach(el =>
+    el.style.setProperty(el.hasAttribute('popover') ? 'position-anchor' : 'anchor-name', el.dataset.anchor));
+}
+
+/* ---------------- small renderers ---------------- */
+function table(head, rows){
+  if(!rows.length) return '<p class="reason">（此件沒有這項資料）</p>';
+  return `<table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+          <tbody>${rows.join('')}</tbody></table>`;
+}
+function capNote(b){
+  return (b && b.truncated)
+    ? `<div class="trunc">只顯示前 ${b.cap} 筆，實際共 ${b.total} 筆（沒有靜默截斷）</div>` : '';
+}
+const reasonOf = f => ((CARD.missing||[]).find(m=>m.field===f)||{}).reason;
+
+/* ---------------- document bar ---------------- */
+function renderDocBar(c){
+  const P=[], C=[];
+  const add = (label,title,body,opts) => { const p=makePop(label,title,body,opts); C.push(p.chip); P.push(p.pop); };
+
+  add(`書目`, '書目資料', `<dl>
+      <dt>公開／公告號</dt><dd class="mono">${esc(c.number)}</dd>
+      <dt>Espacenet 格式</dt><dd class="mono">${esc(c.espacenet)}</dd>
+      <dt>型態</dt><dd>${c.kind_of_document==='grant'?'公告案 (granted)':'公開案 (pre-grant publication)'}</dd>
+      <dt>公開日</dt><dd>${esc(c.publication_date||'—')}</dd>
+      <dt>申請日</dt><dd>${esc(c.filing_date||'—')}</dd>
+      <dt>優先權日</dt><dd>${esc(c.priority_date||'—')}</dd>
+      <dt>申請人</dt><dd>${esc((c.assignee||[]).join('、')||'—')}</dd>
+      <dt>發明人</dt><dd>${esc((c.inventors||[]).join('、')||'—')}</dd>
+      <dt>法律狀態</dt><dd>${esc(c.legal_status||'—')}</dd></dl>`);
+
+  add(`分類 <b>${c.classifications.total}</b>`, 'CPC / IPC 分類',
+      table(['代碼','說明'], (c.classifications.items||[]).map(x=>
+        `<tr><td class="mono">${esc(x.code)}</td><td>${esc(x.description||'')}</td></tr>`))
+      + capNote(c.classifications), {zero:!c.classifications.total});
+
+  add(`同族 <b>${c.family.total}</b>`, '同族申請案 (family)',
+      table(['申請號','公開號','狀態','優先權日'], (c.family.items||[]).map(x=>
+        `<tr><td class="mono">${esc(x.application_number)}</td><td class="mono">${esc(x.publication)}</td>
+             <td>${esc(x.status||'')}</td><td>${esc(x.priority_date||'')}</td></tr>`))
+      + capNote(c.family), {zero:!c.family.total});
+
+  add(`相似 <b>${c.similar_documents.total}</b>`, '相似文件（Google 建議，可作研究方向線索）',
+      table(['公開號','日期','標題'], (c.similar_documents.items||[]).map(x=>
+        `<tr><td class="mono"><a href="#" data-jump="${esc(x.publication)}">${esc(x.publication)}</a></td>
+             <td class="mono">${esc(x.date||'')}</td><td>${esc(x.title||'')}</td></tr>`))
+      + capNote(c.similar_documents), {zero:!c.similar_documents.total});
+
+  add(`引證 <b>${c.backward_citations.total}/${c.forward_citations.total}</b>`, '引證（前引 / 後引）',
+      `<dl><dt>前引 backward</dt><dd>${c.backward_citations.total} 件（此案引用的前案）</dd>
+           <dt>後引 cited by</dt><dd>${c.forward_citations.total} 件（引用此案的後續專利）</dd></dl>
+       <div style="margin-top:12px" class="mono">${
+         (c.backward_citations.items||[]).map(n=>`<a href="#" data-jump="${esc(n)}">${esc(n)}</a>`).join(' · ') || '—'}</div>
+       ${capNote(c.backward_citations)}`);
+
+  add(`法律 <b>${c.legal_events.total}</b>`, '法律事件',
+      table(['日期','事件','類型'], (c.legal_events.items||[]).map(x=>
+        `<tr><td class="mono">${esc(x.date||'')}</td><td>${esc(x.title||'')}</td><td>${esc(x.type||'')}</td></tr>`))
+      + capNote(c.legal_events), {zero:!c.legal_events.total});
+
+  const miss = c.missing||[];
+  add(`來源${miss.length?` <b>⚠${miss.length}</b>`:''}`, '欄位來源與缺漏',
+      (miss.length ? `<p class="reason"><b>此來源拿不到的欄位：</b></p>` +
+        miss.map(m=>`<p class="reason"><code>${esc(m.field)}</code> — ${esc(m.reason)}</p>`).join('')
+        : `<p class="reason ok">此件所有欄位皆取得。</p>`) +
+      table(['欄位','來源','命中的選擇器'], Object.entries(c.provenance||{}).map(([k,v])=>
+        `<tr><td class="mono">${v.present?'':'· '}${esc(k)}</td><td>${esc(v.source)}</td>
+             <td class="mono">${esc(v.selector||'（未命中）')}</td></tr>`)),
+      {warn:miss.length>0});
+
+  add(`原站`, '在原始網站開啟', `<div class="poplinks">
+      <a href="${esc(c.links.google)}" target="_blank" rel="noopener">Google Patents ↗</a>
+      <a href="${esc(c.links.espacenet)}" target="_blank" rel="noopener">Espacenet（圖式與原檔）↗</a>
+      <a href="${esc(c.links.patentscope)}" target="_blank" rel="noopener">PATENTSCOPE ↗</a></div>`);
+
+  const pdf = c.pdf_link
+    ? `<a class="chip" href="${esc(c.pdf_link)}" target="_blank" rel="noopener" style="text-decoration:none">原文件 PDF ↗</a>`
+    : `<span class="chip warn" title="${esc(reasonOf('pdf_link')||'')}">無 PDF</span>`;
+  const store = c._from_store ? `<span class="chip" title="來自本地庫，未重新抓取">庫存 ${esc((c._fetched_at||'').slice(0,10))}</span>` : '';
+
+  $('#docbar').innerHTML = `
+    <div class="titleline">
+      <span class="chip id">${esc(c.number)}</span>
+      <span class="chip state">${c.kind_of_document==='grant'?'公告':'公開'} · ${esc(c.legal_status||'—')}</span>
+      <h1 id="title" title="點擊展開完整標題">${esc(c.title)}</h1>
+    </div>
+    <div class="chips">${C.join('')}<span class="sep"></span>${pdf}${store}</div>`;
+  $('#pops').innerHTML = P.join('');
+  $('#docbar').style.display = '';
+  $('#title').onclick = e => e.currentTarget.classList.toggle('open');
+}
+
+/* ---------------- reading area ---------------- */
+function renderReader(c){
+  const claims = c.claims||[], indep = claims.filter(x=>!x.dependent), dep = claims.filter(x=>x.dependent);
+  const claimHTML = x => `<div class="claim ${x.dependent?'dep':'indep'}">
+      <div class="tag">${x.dependent?'附屬項':'獨立項'} · Claim ${esc(x.num)}</div><div>${esc(x.text)}</div></div>`;
+
+  const TAB = {
+    abstract:{label:'摘要', note:`${(c.abstract||'').length} 字元`,
+              html:`<div class="prose">${esc(c.abstract)}</div>`},
+    claims:{label:`請求項 ${claims.length}`, note:`獨立項 ${indep.length} / 附屬項 ${dep.length}`,
+            html: claims.length
+              ? indep.map(claimHTML).join('') +
+                (dep.length?`<details class="deps"><summary>展開 ${dep.length} 項附屬項</summary>${dep.map(claimHTML).join('')}</details>`:'')
+              : `<div class="prose">${esc(c.claims_text||'（無）')}</div>`},
+    description:{label:'說明書', note:`${(c.description||'').length.toLocaleString()} 字元`,
+                 html:`<div class="prose">${esc(c.description)}</div>`}
+  };
+
+  const imgs = c.images||[];
+  const figs = imgs.length ? `
+      <div class="figtop"><img id="figbig" src="${esc(imgs[0])}" alt="圖式 1"></div>
+      <div class="figbar">
+        <button id="figprev" title="上一張（←）">‹</button>
+        <span class="n" id="fign">1 / ${imgs.length}</span>
+        <button id="fignext" title="下一張（→）">›</button>
+        <div class="thumbs" id="thumbs">${imgs.map((u,i)=>
+          `<img src="${esc(u)}" data-i="${i}" class="${i?'':'on'}" loading="lazy" alt="圖 ${i+1}"
+                onerror="this.style.display='none'">`).join('')}</div>
+      </div>` : `
+      <div class="figtop"><div class="figempty">${esc(reasonOf('images')||'此件無圖式')}
+        ${c.images_declared ? `<br><br><span class="mono">（頁面宣告 ${c.images_declared} 張，實測無法取得）</span>` : ''}
+        ${c.pdf_link?`<br><br><a href="${esc(c.pdf_link)}" target="_blank" rel="noopener">改開原文件 PDF ↗</a>`:''}
+      </div></div>`;
+
+  $('#stage').innerHTML = `
+    <div class="pane text">
+      <div class="tabs" id="tabs">
+        ${Object.entries(TAB).map(([k,t],i)=>`<button data-t="${k}" class="${i?'':'on'}">${esc(t.label)}</button>`).join('')}
+        <span class="spacer"></span><span class="note" id="tabnote">${esc(TAB.abstract.note)}</span>
+      </div>
+      <div class="body" id="tabbody">${TAB.abstract.html}</div>
+    </div>
+    <div class="split" id="split" title="拖曳調整左右比例"></div>
+    <div class="pane figs">${figs}</div>`;
+
+  $('#tabs').onclick = e => {
+    const b = e.target.closest('button[data-t]'); if(!b) return;
+    [...$('#tabs').querySelectorAll('button')].forEach(x=>x.classList.toggle('on', x===b));
+    $('#tabbody').innerHTML = TAB[b.dataset.t].html;
+    $('#tabnote').textContent = TAB[b.dataset.t].note;
+    $('#tabbody').scrollTop = 0;
+  };
+
+  if(imgs.length) wireFigures(imgs);
+  wireSplitter();
+}
+
+function wireFigures(imgs){
+  figIndex = 0;
+  const big=$('#figbig'), thumbs=$('#thumbs'), n=$('#fign');
+  const show = i => {
+    figIndex = (i + imgs.length) % imgs.length;
+    big.src = imgs[figIndex]; big.classList.remove('zoom'); n.textContent = `${figIndex+1} / ${imgs.length}`;
+    [...thumbs.children].forEach((t,j)=>t.classList.toggle('on', j===figIndex));
+    thumbs.children[figIndex]?.scrollIntoView({block:'nearest',inline:'nearest'});
+  };
+  thumbs.onclick = e => { if(e.target.dataset.i!=null) show(+e.target.dataset.i); };
+  big.onclick = () => big.classList.toggle('zoom');
+  // A drawing that 404/403s must say so, never render as a broken-image glyph.
+  big.onerror = () => {
+    big.replaceWith(Object.assign(document.createElement('div'), {
+      className:'figempty',
+      textContent:`第 ${figIndex+1} 張圖無法載入（來源拒絕存取）。其餘圖片可能仍可檢視。`}));
+  };
+  $('#figprev').onclick = () => show(figIndex-1);
+  $('#fignext').onclick = () => show(figIndex+1);
+  window.figShow = show;
+}
+
+function wireSplitter(){
+  const bar=$('#split'), reader=$('#stage');
+  let dragging=false;
+  const apply = pct => {
+    pct = Math.min(80, Math.max(20, pct));
+    document.documentElement.style.setProperty('--split', pct.toFixed(1));
+    localStorage.setItem('pg.split', pct.toFixed(1));
+  };
+  bar.addEventListener('pointerdown', e => { dragging=true; bar.classList.add('drag');
+                                             bar.setPointerCapture(e.pointerId); });
+  bar.addEventListener('pointermove', e => {
+    if(!dragging) return;
+    const r = reader.getBoundingClientRect();
+    apply((e.clientX - r.left) / r.width * 100);
+  });
+  const stop = () => { dragging=false; bar.classList.remove('drag'); };
+  bar.addEventListener('pointerup', stop); bar.addEventListener('pointercancel', stop);
+  bar.addEventListener('dblclick', () => apply(55));
+}
+
+/* ---------------- flow ---------------- */
+function welcome(msg){
+  $('#docbar').style.display='none'; $('#pops').innerHTML=''; CARD=null;
+  $('#stage').innerHTML = `<div class="center"><div class="box${msg?' err':''}">
+      <h2>${msg? '查不到' : '輸入一個美國專利號碼'}</h2>
+      ${msg? `<p>${esc(msg)}</p>` : ''}
+      <p>下列格式都會解析到同一件（點一下即填入）：</p>
+      <div class="fmt">
+        <span>US20250383260A1</span><span>US 2025/0383260 A1</span><br>
+        <span>US2025383260A1</span><span>6,285,999</span><span>5960411</span>
+      </div>
+      <p style="margin-top:14px">申請號（18/123,456）目前不支援，會明確告知原因。</p>
+    </div></div>`;
+  $('#stage').querySelectorAll('.fmt span').forEach(s =>
+    s.onclick = () => { $('#q').value = s.textContent; go(false); });
+}
+
+function render(c){ CARD=c; renderDocBar(c); renderReader(c); wireAnchors(); }
+
+async function go(refresh){
+  const q=$('#q').value.trim(); if(!q) return;
+  $('#go').disabled=true;
+  try{
+    const r = await fetch(`/api/patent?q=${encodeURIComponent(q)}${refresh?'&refresh=true':''}`);
+    const d = await r.json();
+    if(!r.ok || d.error){
+      welcome((d.error||('HTTP '+r.status)) + (d.tried&&d.tried.length?`（已嘗試：${d.tried.join('、')}）`:''));
+    } else {
+      render(d); loadLib();
+      // Deep link: the card becomes bookmarkable / shareable at ?q=<number>
+      history.replaceState(null, '', '?q=' + encodeURIComponent(d.number));
+    }
+  } catch(e){ welcome('連線失敗：' + e.message); }
+  finally{ $('#go').disabled=false; }
+}
+
+async function loadLib(){
+  try{
+    const d = await (await fetch('/api/library')).json();
+    $('#libchip').innerHTML = `庫 <b>${d.count}</b>`;
+    $('#libbody').innerHTML = d.count
+      ? table(['號碼','標題','存入'], d.recent.map(x=>
+          `<tr><td class="mono"><a href="#" data-jump="${esc(x.number)}">${esc(x.number)}</a></td>
+               <td>${esc((x.title||'').slice(0,60))}</td><td class="mono">${esc((x.fetched_at||'').slice(0,10))}</td></tr>`))
+      : '<p class="reason">還沒有查過任何專利。查過的每一件都會存在這裡。</p>';
+  }catch(e){}
+}
+
+document.addEventListener('click', e => {
+  const j = e.target.closest('[data-jump]');
+  if(j){ e.preventDefault(); document.querySelectorAll('[popover]').forEach(p=>{try{p.hidePopover()}catch(_){}}) ;
+         $('#q').value = j.dataset.jump; go(false); }
+});
+document.addEventListener('keydown', e => {
+  if(e.target.tagName==='INPUT') return;
+  if(e.key==='ArrowLeft' && window.figShow) window.figShow(figIndex-1);
+  if(e.key==='ArrowRight'&& window.figShow) window.figShow(figIndex+1);
+});
+$('#go').onclick = () => go(false);
+$('#refresh').onclick = () => go(true);
+$('#q').addEventListener('keydown', e => { if(e.key==='Enter') go(false); });
+
+const saved = localStorage.getItem('pg.split');
+if(saved) document.documentElement.style.setProperty('--split', saved);
+loadLib();
+const deep = new URLSearchParams(location.search).get('q');
+if(deep){ $('#q').value = deep; go(false); } else { welcome(); }
+</script>
+</body>
+</html>
