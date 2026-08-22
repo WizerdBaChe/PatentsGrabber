@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from patentsgrabber import numbers                                      # noqa: E402
 from patentsgrabber.config import MissingCredentials, load_ops          # noqa: E402
 from patentsgrabber.sources.epo_ops import (                            # noqa: E402
-    OpsAuthError, OpsClient, OpsError, _walk,
+    OpsAuthError, OpsClient, OpsError, _walk, ops_text,
 )
 
 GAP_DOC = "US20250383260A1"   # Stage 0 could serve neither its PDF nor its drawings
@@ -103,17 +103,25 @@ def main() -> int:
     except OpsError as exc:
         check("images / PDF", False, fault(exc))
 
-    print("\n=== 4. full text — is CLIENT.InvalidCountryCode US-specific? ===")
-    # Hypothesis from the previous run: OPS full text does not cover US. Testing
-    # the same call against EP is what separates "not covered" from "our bug".
+    print("\n=== 4. full text — EP yes, US no (ESTABLISHED 2026-08-23) ===")
+    # Settled empirically: US full text answers CLIENT.InvalidCountryCode while
+    # the identical call against EP returns 10,804 characters. That is coverage,
+    # not a defect, so it is asserted as the EXPECTED outcome — a probe that
+    # reports two permanent red lines soon stops being read at all. The EP arm
+    # stays as the live control: if it ever fails, the call really is broken.
     for label, (f2, n2) in (("US", (fmt, num)), ("EP control", ("epodoc", EP_CONTROL))):
         for part, fn in (("claims", client.claims), ("description", client.description)):
             try:
-                data = fn(n2, fmt=f2)
-                text = " ".join(str(t) for t in _walk(data, "p"))
-                check(f"{part} [{label}]", len(text) > 200, f"{len(text):,} chars")
+                text = ops_text(fn(n2, fmt=f2))
+                if label == "US":
+                    check(f"{part} [US] — expected unavailable", False,
+                          f"unexpectedly returned {len(text):,} chars; OPS coverage may have CHANGED")
+                else:
+                    check(f"{part} [{label}]", len(text) > 200, f"{len(text):,} chars")
             except OpsError as exc:
-                check(f"{part} [{label}]", False, fault(exc))
+                expected_us = label == "US" and "InvalidCountryCode" in (exc.body or "")
+                check(f"{part} [{label}]" + (" — confirmed unavailable, as expected" if expected_us else ""),
+                      expected_us, fault(exc))
 
     print("\n=== 5. family + legal status ===")
     for label, fn in (("family", client.family), ("legal status", client.legal)):

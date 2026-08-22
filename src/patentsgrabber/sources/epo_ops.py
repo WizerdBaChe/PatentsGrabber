@@ -138,6 +138,28 @@ def _walk(node, key):
     return out
 
 
+def ops_text(node) -> str:
+    """All human-readable text under an OPS payload, whatever it nests it in.
+
+    Full-text responses use different element names per constituent — claims put
+    their prose in `claim-text`, descriptions in `p` — so extracting by a single
+    guessed element name silently returns 0 characters and reads as "no data".
+    Collecting every "$" text node is immune to that whole class of mistake.
+    """
+    out: list[str] = []
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k == "$" and isinstance(v, str):
+                out.append(v)
+            elif not k.startswith("@"):
+                out.append(ops_text(v))
+    elif isinstance(node, list):
+        out.extend(ops_text(i) for i in node)
+    elif isinstance(node, str):
+        out.append(node)
+    return " ".join(t for t in out if t).strip()
+
+
 class OpsClient:
     def __init__(self, cfg: OpsConfig | None = None, timeout: float = 40.0):
         self.cfg = cfg or load_ops()
