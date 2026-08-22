@@ -75,23 +75,37 @@ def main() -> int:
     print("\n=== 2. which number format does OPS accept? (empirical, not assumed) ===")
     parsed = numbers.normalize(GAP_DOC)
     candidates = [
-        ("epodoc", parsed.espacenet),        # US2025383260A1
-        ("epodoc", parsed.canonical),        # US20250383260A1
-        ("docdb", f"US.{parsed.year}{parsed.serial}.A1"),
+        # EP1000000 is the EPO's own documented example: it separates "the code
+        # is wrong" from "this US document is not in OPS". Test it FIRST.
+        ("epodoc", "EP1000000", "CONTROL — EPO's documented example"),
+        ("epodoc", parsed.espacenet, "US 2025 pub, 6-digit serial"),
+        ("epodoc", parsed.canonical, "US 2025 pub, 7-digit serial"),
+        ("docdb", f"US.{parsed.espacenet[2:-2]}.A1", "US 2025 pub, docdb"),
+        ("epodoc", CONTROL_DOC, "US granted control"),
     ]
-    working: tuple[str, str] | None = None
-    for fmt, num in candidates:
+    ok_formats: list[tuple[str, str]] = []
+    for fmt, num, note in candidates:
         try:
             client.biblio(num, fmt=fmt)
-            check(f"biblio via {fmt}: {num}", True)
-            working = working or (fmt, num)
+            check(f"{note}: {fmt}/{num}", True)
+            ok_formats.append((fmt, num))
         except OpsError as exc:
-            check(f"biblio via {fmt}: {num}", False, f"HTTP {exc.status}")
-    if not working:
-        print("\n  沒有任何號碼格式成功——先確認這件公開案是否已在 OPS 收錄。\n")
+            # The fault body is the whole diagnostic value of a 404 — never drop it.
+            body = " ".join((exc.body or "").split())[:160]
+            check(f"{note}: {fmt}/{num}", False, f"HTTP {exc.status} — {body or '(no body)'}")
+
+    if not ok_formats:
+        print("\n  連 EP1000000 都失敗 → 問題不在號碼格式，而在 URL、token 權限，或該 app\n"
+              "  尚未在 EPO Developer Portal 訂閱 OPS API。請改跑 tools/diag_ops.py。\n")
         return 1
-    fmt, num = working
-    print(f"  --> Stage 1 will use format '{fmt}' with number '{num}'")
+
+    # Prefer a working US form; fall back to the control so later steps still run.
+    us_ok = [(f, n) for f, n in ok_formats if n.startswith("US")]
+    fmt, num = (us_ok or ok_formats)[0]
+    if not us_ok:
+        print("\n  只有 EP 控制項成功 → 程式與金鑰正常，是這些美國號碼在 OPS 查不到。\n"
+              "  後續步驟改用控制項繼續，好知道其餘能力是否可用。\n")
+    print(f"  --> continuing with format '{fmt}', number '{num}'")
 
     print("\n=== 3. THE STAGE 0 GAPS — can OPS supply what Google Patents refused? ===")
     try:
@@ -124,7 +138,7 @@ def main() -> int:
                 text = " ".join(str(t) for t in walk(data, "$"))
                 check(f"{label} ({doc_label})", len(text) > 200, f"{len(text):,} chars")
             except OpsError as exc:
-                check(f"{label} ({doc_label})", False, f"HTTP {exc.status}")
+                check(f"{label} ({doc_label})", False, f"HTTP {exc.status} — {' '.join((exc.body or '').split())[:140]}")
 
     print("\n=== 5. family + legal status (Stage 0 had only Google's view) ===")
     for label, fn in (("family", client.family), ("legal status", client.legal)):
@@ -133,7 +147,7 @@ def main() -> int:
             n = len(walk(data, "publication-reference")) or len(walk(data, "@change-date"))
             check(label, True, f"{n} entries")
         except OpsError as exc:
-            check(label, False, f"HTTP {exc.status}")
+            check(label, False, f"HTTP {exc.status} — {' '.join((exc.body or '').split())[:140]}")
 
     print("\n=== 6. APPLICANT SEARCH — the capability Stage 0 cannot have at all ===")
     try:
@@ -148,7 +162,9 @@ def main() -> int:
     except OpsError as exc:
         check("CQL applicant search", False, f"HTTP {exc.status}: {exc.body[:200]}")
 
-    print("\n=== 7. quota accounting (BR-6: 4 GB/week fair use) ===")
+    # The free threshold is set by the EPO's Fair use charter + price list and can
+    # change at any time (T&C 3.3, 4.1-4.3, 9) — so this reports, never asserts.
+    print("\n=== 7. quota accounting (BR-6; threshold per the EPO Fair use charter) ===")
     print(f"  {client.usage.summary()}")
     if client.usage.last_quota_headers:
         for k, v in client.usage.last_quota_headers.items():

@@ -44,6 +44,23 @@ python tools/verify_ops.py
 python tools/check_secrets.py --tracked
 ```
 
+若金鑰**疑似外洩**：除了到 EPO Developer Portal 重新產生，依 OPS 條款 5.5 你**還必須通知 EPO**（patentdata@epo.org）。這是契約義務，不只是好習慣。
+
+### 若查詢回 404
+
+先跑診斷，它會把 OPS 自己的錯誤碼原文印出來，並用 EPO 官方範例號碼 `EP1000000`
+分辨「程式錯」與「這件文件不在 OPS」：
+
+```powershell
+python tools/diag_ops.py
+```
+
+### 使用條款
+
+接上 OPS 後有一條邊界從偏好變成契約義務：**不得把 OPS 資料「本身」提供給公眾**
+（條款 3.2，違反依 8.3 可被立即終止）。本機自用不受影響，架成公開網站則會踩線。
+完整分析見 `docs/03-ops-terms-compliance.md`。
+
 ## 可以輸入什麼
 
 號碼寬容輸入 —— 下列格式都會解析到同一件：

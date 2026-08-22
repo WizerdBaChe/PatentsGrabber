@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -42,18 +43,43 @@ class OpsAuthError(OpsError):
     """The credential was rejected — distinct from a data-level failure."""
 
 
+def gmt_week() -> str:
+    """The EPO's accounting week: Monday 00:00 to Sunday 24:00 GMT (T&C 4.2).
+
+    Quota is metered per calendar week in GMT, not per process and not in local
+    time, so usage must be bucketed the same way or the number means nothing.
+    """
+    now = datetime.now(timezone.utc)
+    iso = now.isocalendar()
+    return f"{iso.year}-W{iso.week:02d}"
+
+
 @dataclass
 class Usage:
-    """What this process has spent, so BR-6 is observable rather than assumed."""
+    """Bytes spent against the free threshold, bucketed the way the EPO bills.
 
+    The free threshold is defined by the EPO's Fair use charter and price list
+    (T&C 3.3, 4.1-4.3) and the EPO may change it at any time (Article 9), so no
+    number is hard-coded here: this counts, and the operator compares against the
+    figure the EPO currently publishes.
+    """
+
+    week: str = field(default_factory=gmt_week)
     requests: int = 0
     bytes_served: int = 0
     last_throttle: str | None = None          # OPS X-Throttling-Control header
     last_quota_headers: dict[str, str] = field(default_factory=dict)
 
+    def record(self, nbytes: int) -> None:
+        current = gmt_week()
+        if current != self.week:            # a new GMT week resets the meter
+            self.week, self.requests, self.bytes_served = current, 0, 0
+        self.requests += 1
+        self.bytes_served += nbytes
+
     def summary(self) -> str:
         mb = self.bytes_served / 1_048_576
-        return (f"{self.requests} requests, {mb:.2f} MB this session"
+        return (f"{self.requests} requests, {mb:.2f} MB in GMT week {self.week}"
                 + (f" | throttle: {self.last_throttle}" if self.last_throttle else ""))
 
 
@@ -105,8 +131,7 @@ class OpsClient:
             headers={"Authorization": f"Bearer {self.token()}", "Accept": accept},
             params=params,
         )
-        self.usage.requests += 1
-        self.usage.bytes_served += len(r.content)
+        self.usage.record(len(r.content))
         if "X-Throttling-Control" in r.headers:
             self.usage.last_throttle = r.headers["X-Throttling-Control"]
         self.usage.last_quota_headers = {
@@ -123,7 +148,15 @@ class OpsClient:
 
         if raw:
             return r
-        return r.json() if accept.endswith("json") else r.text
+        if accept.endswith("json"):
+            try:
+                return r.json()
+            except ValueError:
+                # OPS documents XML as its native form; some services ignore the
+                # JSON Accept and answer XML anyway. Returning the text beats
+                # raising a decode error that hides a perfectly good response.
+                return r.text
+        return r.text
 
     # ------------------------------------------------------ typed operations
 
