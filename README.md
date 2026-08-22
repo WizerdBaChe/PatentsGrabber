@@ -12,7 +12,37 @@ python run.py
 
 或直接雙擊 `run.bat`（會自動開瀏覽器）。服務位於 <http://127.0.0.1:8000>。
 
-首次啟動不需要任何 API 金鑰或註冊。
+Stage 0 不需要任何 API 金鑰或註冊。
+
+## 金鑰設定（Stage 1 才需要）
+
+**金鑰只放 `.env`，不進版控，也不要貼進任何其他檔案、commit 訊息或對話。**
+
+```powershell
+copy .env.example .env
+```
+
+用文字編輯器打開 `.env`，把 EPO Developer Portal 上該 app 的 Consumer Key 與
+Consumer Secret 填進去，存檔，然後驗證：
+
+```powershell
+python tools/verify_ops.py
+```
+
+這支腳本不做「hello world」——它逐項測試 Stage 0 做不到的能力（原文件 PDF、
+圖式、全文、同族、法律狀態、申請人檢索），所以綠燈就是 Stage 1 可行的直接證據，
+紅燈會指出是哪一項不可得。它從不印出金鑰值。
+
+### 為什麼可以放心
+
+- `.gitignore` 與 `git init` 在**任何金鑰檔存在之前**就建立好，所以金鑰從未有可被提交的時間窗。
+- `.githooks/pre-commit` 每次提交都會掃描**即將進入提交的內容**；掃到疑似憑證就中止提交。
+- 這個防護做過雙向校正：植入假憑證會被擋下（`git commit` 回非零、不產生提交），正常內容放行。
+- 隨時可自行稽核全部已追蹤檔案：
+
+```powershell
+python tools/check_secrets.py --tracked
+```
 
 ## 可以輸入什麼
 
