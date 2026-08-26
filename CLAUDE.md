@@ -75,6 +75,8 @@ re-tried on the next read.
 
 - `docs/01-concept-note.md` — business rules BR-1…BR-8, boundaries, staging
 - `docs/05-stage1-spec.md` — Stage 1 scope, settled facts (F-1…F-8), acceptance
+- `docs/06-stage1-review.md` — which rule is guarded by which gate, and where the
+  gates are blind. Read it before assuming a green run proves something.
 - Gates: `tools/check_reading.py` (structure added without losing text, with
   controls both ways and a self-calibration case), `tools/verify_ops.py`,
   `tools/smoke_service.py`, `tests/test_ops_number_formats.py`
