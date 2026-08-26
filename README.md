@@ -62,6 +62,29 @@ python tools/diag_ops.py
 （條款 3.2，違反依 8.3 可被立即終止）。本機自用不受影響，架成公開網站則會踩線。
 完整分析見 `docs/03-ops-terms-compliance.md`。
 
+## 公司名檢索（Stage 1-C）
+
+同一個輸入框，**不必先選要查哪一種**：看起來像號碼就開專利卡，否則就當成名字送去 EPO OPS 的欄位檢索。
+
+```
+Corning                 → 申請人檢索
+in=Larry Page           → 發明人檢索
+ta=fiber array          → 標題／摘要檢索
+```
+
+結果列表每列可以直接點進去讀（就是同一張專利卡），並且**把不可靠的地方全部講出來**：
+
+- **總數與可取數分開講**：`Corning` 有 22,592 件，但 OPS 只讓翻前 **2,000** 筆，介面直接寫「其餘 20,592 件無法翻到——請加條件收斂」。
+- **申請人名稱變體攤開**（BR-8）：`Corning` 的 50 筆裡出現 7 種寫法，其中 `OWENS CORNING INTELLECTUAL CAPITAL`（完全不同公司）、寧波一家康寧醫院、`UNIV KENT STATE OHIO` 都混在裡面。點任一個名稱即可收斂到那個確切寫法。清單只涵蓋本頁，介面明說。
+- **預設只看美國案**（CQL 加 `pn=US`，OPS 端過濾，非畫面過濾）。關掉之後 WO/EP/CN 案會出現，但會標明本工具讀不了並附 Espacenet 連結。
+- **本次花費多少配額**直接寫在標頭（50 筆約 286 KB）。
+
+### Google Patents 比 OPS 慢好幾個月
+
+實測 2026-06 到 2026-08 的 24 件美國公開案，**Google Patents 一件都沒有**。而 OPS 檢索是新到舊排序，所以公司檢索的第一頁正好全是 Google 還沒收錄的。
+
+因此當 Google 沒有某件時，專利卡改由 **OPS 書目**組成：標題、申請人、發明人、日期、CPC、摘要照常顯示，圖式與原文件掃描照常可看，**只有全文明說沒有**（OPS 的全文不涵蓋美國案）。這張卡是暫時性的——下次再查會重試 Google，收錄後自動換成完整版。
+
 ## 可以輸入什麼
 
 號碼寬容輸入 —— 下列格式都會解析到同一件：
@@ -139,6 +162,7 @@ US2025383260A1        (Espacenet 格式)
 
 ```powershell
 python tools/check_reading.py             # 分段結構是否只加結構、沒吃掉字（含正／負控與儀器校正）
+python tools/check_search.py              # 檢索是否誠實（截斷宣告、名稱變體、CQL 注入、正負對照）
 python tools/probe_coverage.py            # 覆蓋率探針（用本地快取的 HTML）
 python tools/probe_coverage.py --refresh  # 重新抓取所有樣本
 python tools/smoke_service.py             # 端到端煙霧測試

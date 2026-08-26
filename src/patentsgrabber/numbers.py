@@ -61,29 +61,48 @@ class ParsedNumber:
     # The Espacenet display form (US2025383260A1) is valid as NEITHER.
 
     @property
+    def ops_bodies(self) -> list[str]:
+        """Number bodies OPS may hold this document under, most likely first.
+
+        Publication serials are stored BOTH ways and it is per document, not per
+        rule (measured 2026-08-26):
+            US20260189299A1 -> docdb US.20260189299.A1   (full 7-digit serial)
+            US20250383260A1 -> docdb US.2025383260.A1    (leading zero dropped)
+        The 2026-08-23 finding that docdb "must" use the 6-digit form held for
+        the document it was measured on and does not generalise. Trying both
+        costs one extra 404 at worst; guessing costs the document.
+        """
+        if self.kind_of_document != "publication":
+            return [self.serial]
+        full = f"{self.year}{self.serial.zfill(7)}"
+        short = f"{self.year}{self.serial.lstrip('0').zfill(6)}"
+        return list(dict.fromkeys([full, short]))
+
+    @property
     def ops_body(self) -> str:
-        """Country-less number body as OPS wants it: year+6-digit, or the grant serial."""
-        if self.kind_of_document == "publication":
-            return f"{self.year}{self.serial.lstrip('0').zfill(6)}"
-        return self.serial
+        """The first body OPS is likely to accept (kept for callers wanting one)."""
+        return self.ops_bodies[0]
 
     @property
     def epodoc(self) -> str:
         """epodoc input format — no kind code."""
         return f"{self.country}{self.ops_body}"
 
-    def docdb(self, kind: str | None = None) -> str:
+    def epodoc_candidates(self) -> list[str]:
+        return [f"{self.country}{body}" for body in self.ops_bodies]
+
+    def docdb(self, kind: str | None = None, body: str | None = None) -> str:
         """docdb input format — country.number.kind, kind required."""
         k = kind or self.kind_code or (US_PUB_KINDS if self.kind_of_document == "publication"
                                        else US_GRANT_KINDS)[0]
-        return f"{self.country}.{self.ops_body}.{k}"
+        return f"{self.country}.{body or self.ops_body}.{k}"
 
     def docdb_candidates(self) -> list[str]:
-        """docdb forms to try in order when the kind code was not supplied."""
-        if self.kind_code:
-            return [self.docdb(self.kind_code)]
-        kinds = US_PUB_KINDS if self.kind_of_document == "publication" else US_GRANT_KINDS
-        return [self.docdb(k) for k in kinds]
+        """docdb forms to try in order: every body, and every plausible kind."""
+        kinds = ([self.kind_code] if self.kind_code
+                 else list(US_PUB_KINDS if self.kind_of_document == "publication"
+                           else US_GRANT_KINDS))
+        return [self.docdb(kind, body) for body in self.ops_bodies for kind in kinds]
 
 
 def _split_kind(token: str) -> tuple[str, str | None]:

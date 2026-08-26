@@ -1,23 +1,33 @@
 """Pin the OPS input-number rules that cost a live debugging round to find.
 
-Every expectation below was OBSERVED against the live OPS API on 2026-08-23, not
-inferred from documentation. They are counter-intuitive enough that a future
-refactor would plausibly "fix" them back into the broken form, which is exactly
-what a test is for:
+Every expectation below was OBSERVED against the live OPS API, not inferred from
+documentation. They are counter-intuitive enough that a future refactor would
+plausibly "fix" them back into a broken form, which is exactly what this is for.
 
+    2026-08-23
     epodoc/US6285999B1        -> 404 SERVER.EntityNotFound   (kind code rejected)
     epodoc/US6285999          -> 200                          (no kind code)
     docdb/US.20250383260.A1   -> 404 SERVER.EntityNotFound   (7-digit serial)
     docdb/US.2025383260.A1    -> 200                          (6-digit serial)
 
-The Espacenet display form US2025383260A1 is valid as NEITHER format; it is a
-display string, and using it as an API input is the defect this file guards.
+    2026-08-26 — the 6-digit finding does NOT generalise
+    docdb/US.2026189299.A1    -> 404 SERVER.EntityNotFound
+    docdb/US.20260189299.A1   -> 200                          (full 7-digit serial)
+    epodoc/US2026189299       -> 404
+    epodoc/US20260189299      -> 200
+
+    So which serial width OPS holds a publication under is a property of the
+    RECORD, not a rule. Both widths must be offered as candidates; picking one
+    loses whichever documents use the other. What stays invariant is the shape:
+    epodoc never carries a kind code, docdb always does, and the Espacenet
+    display form (US2025383260A1) is valid as NEITHER.
 
     python -m pytest tests/ -q      (or: python tests/test_ops_number_formats.py)
 """
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -25,48 +35,68 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from patentsgrabber import numbers  # noqa: E402
 
-CASES_EPODOC = [
-    # (user input, expected epodoc -- never carries a kind code)
+KIND_CODES = ("A1", "A2", "A9", "B1", "B2")
+
+# (input, a docdb form the live API answered 200 to)
+PROVEN_DOCDB = [
+    ("US20250383260A1", "US.2025383260.A1"),      # 2026-08-23
+    ("US 2025/0383260 A1", "US.2025383260.A1"),
+    ("US2025383260A1", "US.2025383260.A1"),
+    ("US20260189299A1", "US.20260189299.A1"),     # 2026-08-26, the other width
+    ("US6285999B1", "US.6285999.B1"),
+]
+
+# (input, an epodoc form the live API answered 200 to)
+PROVEN_EPODOC = [
     ("US20250383260A1", "US2025383260"),
-    ("US 2025/0383260 A1", "US2025383260"),
-    ("US2025383260A1", "US2025383260"),
+    ("US20260189299A1", "US20260189299"),
     ("US6285999B1", "US6285999"),
     ("6,285,999", "US6285999"),
     ("5960411", "US5960411"),
 ]
 
-CASES_DOCDB = [
-    # (user input, expected docdb -- 6-digit serial for publications, kind required)
-    ("US20250383260A1", "US.2025383260.A1"),
-    ("US 2025/0383260 A1", "US.2025383260.A1"),
-    ("US2025383260A1", "US.2025383260.A1"),
-    ("US6285999B1", "US.6285999.B1"),
-]
-
-# Forms proven to fail against the live API — the code must never emit them.
-MUST_NOT_EMIT = {"US2025383260A1", "US6285999B1", "US.20250383260.A1", "US20250383260A1"}
+# Valid as neither format: a display string, not an API input.
+DISPLAY_FORMS = {"US2025383260A1", "US6285999B1", "US20250383260A1"}
 
 
 def test_epodoc_never_carries_kind_code():
-    for raw, expected in CASES_EPODOC:
-        got = numbers.normalize(raw).epodoc
-        assert got == expected, f"{raw!r}: epodoc {got!r} != {expected!r}"
-        assert not got[-2:].upper() in ("A1", "A2", "A9", "B1", "B2"), \
-            f"{raw!r}: epodoc {got!r} still carries a kind code"
+    for raw, _ in PROVEN_EPODOC + PROVEN_DOCDB:
+        for emitted in numbers.normalize(raw).epodoc_candidates():
+            assert not emitted.upper().endswith(KIND_CODES), \
+                f"{raw!r}: epodoc {emitted!r} carries a kind code"
 
 
-def test_docdb_uses_six_digit_serial_and_keeps_kind():
-    for raw, expected in CASES_DOCDB:
-        got = numbers.normalize(raw).docdb()
-        assert got == expected, f"{raw!r}: docdb {got!r} != {expected!r}"
+def test_epodoc_candidates_contain_the_form_that_worked():
+    for raw, expected in PROVEN_EPODOC:
+        got = numbers.normalize(raw).epodoc_candidates()
+        assert expected in got, f"{raw!r}: {expected!r} missing from epodoc candidates {got}"
 
 
-def test_never_emits_a_form_the_api_rejects():
-    for raw, _ in CASES_EPODOC + CASES_DOCDB:
+def test_docdb_candidates_cover_both_serial_widths():
+    for raw, expected in PROVEN_DOCDB:
+        got = numbers.normalize(raw).docdb_candidates()
+        assert expected in got, f"{raw!r}: {expected!r} missing from docdb candidates {got}"
+
+
+def test_docdb_is_always_country_digits_kind():
+    """Guards the shape, not just the value.
+
+    A resolver bug once concatenated every doc-number in a number-service reply
+    and asked OPS for `US.US2026189299A12026189299A1.A1`, which exists nowhere.
+    A docdb body is digits; anything else is a construction error.
+    """
+    shape = re.compile(r"^[A-Z]{2}\.\d+\.[A-Z]\d?$")
+    for raw, _ in PROVEN_DOCDB + PROVEN_EPODOC:
+        for emitted in numbers.normalize(raw).docdb_candidates():
+            assert shape.match(emitted), f"{raw!r}: docdb {emitted!r} is malformed"
+
+
+def test_never_emits_a_display_form_as_an_api_input():
+    for raw, _ in PROVEN_EPODOC + PROVEN_DOCDB:
         p = numbers.normalize(raw)
-        for emitted in [p.epodoc, p.docdb(), *p.docdb_candidates()]:
-            assert emitted not in MUST_NOT_EMIT, \
-                f"{raw!r} emitted {emitted!r}, a form the live API answers 404 to"
+        for emitted in p.epodoc_candidates() + p.docdb_candidates():
+            assert emitted not in DISPLAY_FORMS, \
+                f"{raw!r} emitted {emitted!r}, a display string the API rejects"
 
 
 def test_kindless_input_produces_candidates_in_likelihood_order():
@@ -78,7 +108,7 @@ def test_kindless_input_produces_candidates_in_likelihood_order():
 def test_espacenet_display_form_is_kept_but_is_not_an_api_input():
     p = numbers.normalize("US20250383260A1")
     assert p.espacenet == "US2025383260A1"      # still correct for display / deep links
-    assert p.espacenet != p.epodoc              # and must not be confused with the API form
+    assert p.espacenet not in p.epodoc_candidates()
     assert p.espacenet not in p.docdb_candidates()
 
 

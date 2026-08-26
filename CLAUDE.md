@@ -28,12 +28,35 @@ ops-relaxation: L1
   page images are fetched only when looked at and cached under `var/ops-cache/`.
 - Credentials live in `.env` only. Never print, log, or paste a key value.
 
-## Reading structure
+## Stored cards carry the version of the code that built them
 
-`google_patents.READING_SCHEMA` versions the description-block and claim-tree
-extraction. **Bump it whenever that extraction changes**: stored cards carry the
-version they were built with and are re-derived from `var/raw/` on the next read,
-so a parser fix reaches the existing library instead of only new lookups.
+Two schema constants, same purpose: a fix must reach the cards already in the
+library, not only the next lookup.
+
+- `google_patents.READING_SCHEMA` — description blocks and the claim tree.
+  Bumping it re-derives stored cards from `var/raw/` (no network).
+- `service.OPS_CARD_SCHEMA` — the OPS-built card. Bumping it re-fetches from OPS.
+
+**Bump the matching constant in the same commit as any change to what those
+extractors produce.** Both were caught the hard way: a claim-parser fix and an
+abstract-cleanup fix each landed while a stale card sat in the library.
+
+## Number formats are per record, not per rule
+
+Which serial width OPS holds a US publication under differs by document
+(`US.2025383260.A1` vs `US.20260189299.A1`; the other width 404s in each case).
+Candidates offer both widths; never "simplify" that back to one. epodoc never
+carries a kind code, docdb always does, and the Espacenet display form
+(`US2025383260A1`) is an API input for neither. Pinned in
+`tests/test_ops_number_formats.py`.
+
+## Google Patents lags OPS by months
+
+Measured 2026-08-26: of 24 US publications from 2026-06…08, Google Patents had
+none. Search results are newest-first, so the first page of a company search is
+exactly the part with no Google record. That is why the card falls back to OPS
+bibliographic data instead of failing — and why that fallback is provisional and
+re-tried on the next read.
 
 ## Where things are written down
 

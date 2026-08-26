@@ -36,6 +36,12 @@ Boundaries that touch this round (CIM §4): **no public deployment** — after O
 | **F-6** | Figure references are **already semantic**: `<figref idrefs="DRAWINGS">FIG. <b>3</b></figref>` — 0 in pre-2000 documents, 9–1074 in modern ones. Reference numerals are marked as `<figure-callout>` | same sweep |
 | **F-7** | Claims are **already segmented in the markup**, in **two shapes**: limitations nested inside the preamble's `div.claim-text` (`US20250383260A1`, `US5960411A`, `US4237224A`, `US8046721B2`) **or** as siblings of it (`US6285999B1`). Plus `<claim-ref idref="CLM-00001">` cross-references. The Stage 0 parser flattens all of it with `get_text(" ")` | same sweep; the sibling shape was found by eye on a screenshot after the nested-only parser rendered a claim as its preamble alone — which is why claim coverage is now measured, not just description coverage |
 | **F-8** | Quota is metered by OPS's own headers (`x-registeredquotaperweek-used`, `x-throttling-control`), bucketed by GMT week. Observed 2026-08-26: system state `overloaded` → images 50/min, search 5/min | `epo_ops.Usage`, live headers |
+| **F-9** | **Search limits (S-6, answered).** `Range` span max **100** per call; `Range` end max **2000**. Beyond either → HTTP 400 `CLIENT.InvalidQuery`. So a 38,955-hit query exposes only its first 2,000. Zero results is **HTTP 404 `SERVER.EntityNotFound`** — an answer, not a failure | measured 2026-08-26 |
+| **F-10** | `pn=US` restricts the result set to US publications server-side (`pa="Corning"` 38,955 → 22,592; a 50-row page came back 50/50 US). `cc=US` → `CLIENT.InvalidIndex`; `pn=US*` → `CLIENT.MinimumCharsBeforeTruncation` | measured 2026-08-26 |
+| **F-11** | **`published-data/search/biblio` is what makes BR-8 possible.** The plain search returns document ids only; the biblio constituent carries applicant names twice — `@data-format="epodoc"` (normalised, `CORNING INC [US]`) and `"original"` (as filed, `CORNING INCORPORATED`) — plus titles, inventors and abstracts. Cost ~5–8 KB per result | measured 2026-08-26 |
+| **F-12** | **S-7, answered: the variant problem is real and includes false positives.** `pa="Corning"` over 100 results → **9 distinct normalised names, 12 as-filed**, among them `OWENS CORNING INTELLECTUAL CAPITAL` (a different company), a Ningbo hospital named 康寧, `UNIV KENT STATE OHIO` and `PAROC GROUP OY`. `pa="Taiwan Semiconductor"` → 5 normalised / 9 as-filed for essentially one company | measured 2026-08-26 |
+| **F-13** | **Google Patents lags OPS by months.** Of 24 US publications from 2026-06…2026-08 returned by OPS search, Google Patents had **0**. Since OPS sorts newest-first, the first page of a company search is precisely the part the Google-only card path cannot open | measured 2026-08-26 |
+| **F-14** | **F-2 does not generalise.** Which serial width OPS holds a publication under is per RECORD: `US.2025383260.A1` works and `US.20250383260.A1` 404s, while `US.20260189299.A1` works and `US.2026189299.A1` 404s. Both widths must be offered as candidates. What stays invariant: epodoc never carries a kind code, docdb always does, and the Espacenet display form is valid as neither | measured 2026-08-26, pinned in `tests/test_ops_number_formats.py` |
 
 > F-5/F-6/F-7 are the mechanical basis for §4. The reading optimizations below are **not** heuristics layered on flat text — they recover structure the source already publishes and Stage 0 discarded.
 
@@ -47,7 +53,8 @@ Boundaries that touch this round (CIM §4): **no public deployment** — after O
 |---|---|---|---|
 | **S1-A** | OPS drawings + original document PDF, filling the two Stage 0 holes | **YES** | `docs/04` §1 calls this "the entire reason for connecting OPS". It repairs the user's own example document |
 | **S1-B** | INPADOC family + legal events from OPS (richer than the Google table) | **YES, on demand** | One extra call, only when the user opens the panel |
-| **S1-C** | Applicant / company CQL search + result list + BR-8 name variants | no — next round | A second entry point with its own UI surface; mixing it into this round would ship both at 60% |
+| **S1-C** | Applicant / company CQL search + result list + BR-8 name variants | **YES** (2026-08-26, second round) | Built after the reading work landed; brought its own discovery, F-13, which forced the OPS-only card below |
+| **S1-C′** | **OPS-only card**: when Google Patents does not have a document, build the card from OPS biblio (title, applicants, inventors, dates, CPC, abstract) with the full text declared absent and the reasons stated | **YES**, forced by F-13 | Without it the first page of every company search dead-ends in "查不到" while the document sits in OPS. Provisional by construction: it is re-tried against Google on the next read |
 | **S1-D** | EP jurisdiction (EP full text via OPS, EP number parsing) | no — next round | `numbers.py` is US-only by construction; EP needs its own normalization + card path |
 | **S1-E** | Number normalization through OPS number-service | partial (already the last-resort path in `OpsClient.resolve`) | Promoting it to primary costs a call per lookup for no measured gain |
 
@@ -126,6 +133,23 @@ Human-eye (must be confirmed in the real browser; see the delivery checklist):
 7. Reading controls change size/leading/measure live and survive a reload.
 
 ---
+
+### 5.3 S1-C applicant search (2026-08-26, third round)
+
+`tools/check_search.py` — **16/16**, controls in both directions plus one calibration:
+
+| Check | Result |
+|---|---|
+| CQL injection | `Corning" OR pa="Apple` → `pa="Corning OR pa= Apple" AND pn=US`: still ONE quoted term. The matcher is calibrated — it rejects a hand-built two-clause query, so the check can fail |
+| Positive control | `pa="Taiwan Semiconductor" AND pn=US` → 30,569 hits, 25 rows, **countries = {US}**, 25/25 marked openable |
+| Truncation | total 30,569, reachable 2,000, `depth_capped=true` — stated in the header, not silently cut |
+| BR-8 broad name | `pa="Corning"` → 7 distinct applicant spellings, each carrying its as-filed form |
+| BR-8 refine | clicking a variant → `pa="CORNING RESEARCH & DEVELOPMENT CORPORATION" AND pn=US` → 701 hits, variants collapse to 1. `&` survives into CQL |
+| Negative control | nonsense applicant → `available=true, total=0` with a reason naming the field — never an error |
+| BR-1 dispatch | numbers → card, names → search, `in=` prefix honoured, 台積電 routed as a name; 0 misrouted |
+| Browser flow | list (50 rows, 7 variants) → row → OPS-only card (EPO 14 sheets / 37 pages, drawing loaded at 2550 px, description pane states the reason) → back chip returns to the list in ~1 s **without another OPS call** |
+| Worldwide toggle | unchecking 只看美國案 drops `pn=US`; rows become WO/EP/US and 37 of 50 are marked un-openable with an Espacenet link each |
+| Page cost | 50 rows ≈ 286 KB; stated in the header so the reader can see what a search costs |
 
 ## 6. 本輪範圍決定與待裁決事項
 
