@@ -70,6 +70,7 @@ The claim to beat is narrow and honest: Google Patents, Espacenet and PATENTSCOP
 | **R-7** | Reference numerals (`figure-callout`) get a subtle marker; off by default | F-6 |
 | **R-8** | **No silent waiting.** Every wait over ~300 ms names what it is waiting for and how long it has been waiting. The phases shown are the real ones (parse → Google Patents → EPO inquiry); no fake progress | user ruling 2026-08-26 |
 | **R-9** | **The layout follows the window.** The reading column is capped at the measure for readability, so the text pane is sized to the column and the remainder goes to the drawing; the column centres in its pane. Verified at 1920×1080 and 2560×1440, not at 1024 | user ruling 2026-08-26 — a fixed 55% split wasted ~800 px on a 2560 screen |
+| **R-10** | **The line follows the screen too, inside the typographic range.** Default type size and measure are picked from the viewport (68ch/16px → 72ch/17px → 76ch/18px), never "fill the window": past ~90 characters the return sweep fails. Any control the reader touches pins their values permanently; the panel states which mode it is in | user question 2026-08-26 — sizing only the pane left the line at 68ch on every display |
 
 **Non-goals for §4**: no re-writing, summarizing, or translating of patent text; no AI-generated reading aids. Structure comes from the source markup or it is not shown.
 
@@ -113,6 +114,10 @@ Machine-checkable:
 | R-8 during EPO enrichment | chip observed passing through **`EPO 取得中…`** → `EPO 16圖/25頁`; PDF chip shows `原文件 PDF · EPO 確認中…` until the inquiry answers |
 | R-8 on the 25-page original | clicking it raises: "EPO 正在逐頁取回 **25** 頁並合併，約 **20** 秒…" |
 | R-8 per drawing page | the overlay says `向 EPO 取第 n 頁…` rather than a bare spinner |
+| R-10 at 2560×1440 | auto 18 px / 76 ch → column **681 px** (was 544), panes 801 / 1752 |
+| R-10 at 1920×1080 | auto 17 px / 72 ch → column **609 px**, text pane 726 px |
+| R-10 reader override | setting measure to 60 ch pins it: unchanged across a resize; 回到預設 clears the stored values and returns to the automatic pair. The panel states which mode is active |
+| R-10 instrument note | CDP viewport emulation does **not** dispatch `resize` to the page, so the re-pick was verified by dispatching the event (17/72 → 18/76 at 2560). A real window drag stays a human check |
 
 Human-eye (must be confirmed in the real browser; see the delivery checklist):
 

@@ -267,6 +267,7 @@
 <div id="pop-read" popover>
   <div class="pop-h">閱讀設定（會記住）</div>
   <div class="pop-b">
+    <p class="reason" id="readnote"></p>
     <div class="ctrl">
       <label for="c-fs">字級</label><input id="c-fs" type="range" min="13" max="22" step="1"><output id="o-fs"></output>
       <label for="c-lh">行距</label><input id="c-lh" type="range" min="1.4" max="2.3" step="0.05"><output id="o-lh"></output>
@@ -301,6 +302,22 @@ let FIT = (() => { try{ return localStorage.getItem('pg.figfit') || 'page'; }cat
 /* ---------------- reading preferences ---------------- */
 const READ_DEFAULTS = {fs:16, lh:1.8, measure:68, gap:1.0, numbers:true, serif:true, numerals:false};
 let READ = {...READ_DEFAULTS};
+let READ_SET_BY_USER = false;   // once true, the screen never overrides the reader
+
+/* Defaults follow the screen. Two things change with a wider display and both
+   matter: a 2560-wide panel is usually a denser one (≈109 ppi against ≈92), so
+   16px is physically smaller there; and a wider window can carry a longer line
+   without the reader losing the return sweep. The measure stays inside the
+   typographic range — 68 to 76 characters, never the 100+ that filling the
+   window would give — because past roughly 90 the eye starts skipping lines.
+   Touch any control once and your own values win from then on. */
+function screenDefaults(){
+  const w = window.innerWidth || 1920;
+  const d = {...READ_DEFAULTS};
+  if(w >= 2300)      { d.fs = 18; d.measure = 76; }
+  else if(w >= 1900) { d.fs = 17; d.measure = 72; }
+  return d;
+}
 
 function applyRead(save){
   const r = document.documentElement.style;
@@ -319,22 +336,33 @@ function applyRead(save){
   $('#c-num').checked = READ.numbers;
   $('#c-serif').checked = READ.serif;
   $('#c-numeral').checked = READ.numerals;
+  const note = $('#readnote');
+  if(note) note.textContent = READ_SET_BY_USER
+    ? '目前用你自己的設定。按「回到預設」會交還給螢幕寬度自動決定。'
+    : `目前依螢幕寬度自動選（${window.innerWidth}px → 字級 ${READ.fs}px、行寬 ${READ.measure}ch）。動任何一項就改用你的設定。`;
   // Type size, measure and the number gutter all change how wide the column is,
   // so the automatic pane width has to follow them.
   if(typeof applyIdealSplit === 'function') applyIdealSplit();
   if(save !== false) try{ localStorage.setItem('pg.read', JSON.stringify(READ)); }catch(e){}
 }
 function wireRead(){
-  try{ READ = {...READ_DEFAULTS, ...JSON.parse(localStorage.getItem('pg.read')||'{}')}; }catch(e){}
+  let stored = null;
+  try{ stored = JSON.parse(localStorage.getItem('pg.read') || 'null'); }catch(e){}
+  READ = stored ? {...READ_DEFAULTS, ...stored} : screenDefaults();
+  READ_SET_BY_USER = !!stored;
   const bind = (id, key, num) => $(id).addEventListener('input', e => {
-    READ[key] = num ? parseFloat(e.target.value) : e.target.checked; applyRead();
+    READ[key] = num ? parseFloat(e.target.value) : e.target.checked;
+    READ_SET_BY_USER = true;
+    applyRead();
   });
   bind('#c-fs','fs',1); bind('#c-lh','lh',1); bind('#c-me','measure',1); bind('#c-gp','gap',1);
   bind('#c-num','numbers',0); bind('#c-serif','serif',0); bind('#c-numeral','numerals',0);
   $('#c-reset').onclick = () => {
-    READ = {...READ_DEFAULTS};
+    READ = screenDefaults();
+    READ_SET_BY_USER = false;
+    try{ localStorage.removeItem('pg.read'); }catch(e){}
     try{ localStorage.removeItem('pg.split'); }catch(e){}   // back to the automatic width
-    applyRead();
+    applyRead(false);          // false: do NOT re-save, or "auto" becomes "chosen"
     applyIdealSplit(true);
   };
   applyRead(false);
@@ -984,7 +1012,18 @@ $('#q').addEventListener('keydown', e => { if(e.key==='Enter') go(false); });
 let resizeTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => applyIdealSplit(), 120);   // no-op if the user set one
+  resizeTimer = setTimeout(() => {
+    // Moving the window to another monitor should re-pick the defaults — but
+    // only for a reader who has not set their own; theirs are never overwritten.
+    if(!READ_SET_BY_USER){
+      const next = screenDefaults();
+      if(next.fs !== READ.fs || next.measure !== READ.measure){
+        READ = {...READ, ...next};
+        applyRead(false);
+      }
+    }
+    applyIdealSplit();                       // no-op if the user dragged one
+  }, 140);
 });
 
 const saved = localStorage.getItem('pg.split');
