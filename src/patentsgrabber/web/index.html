@@ -83,7 +83,12 @@
   .body{flex:1 1 auto;overflow:auto;padding:14px 20px 40vh;min-height:0;scroll-behavior:smooth}
 
   /* ---------- the reading surface itself ---------- */
-  .doc{max-width:var(--measure);margin-left:var(--gutter);
+  /* The column is capped at the measure for readability, so on a wide screen the
+     pane is wider than the text. Centre the column instead of leaving all of the
+     slack on one side — a 2560px window otherwise reads as a broken layout. */
+  .doc{max-width:var(--measure);
+       margin-left:max(var(--gutter), calc((100% - var(--measure)) / 2));
+       margin-right:auto;
        font-family:var(--prose);font-size:var(--fs);line-height:var(--lh)}
   .doc h3.sec{font-family:var(--sans);font-size:12px;font-weight:700;letter-spacing:.09em;
               text-transform:uppercase;color:var(--accent);margin:2.4em 0 .95em;
@@ -109,7 +114,10 @@
 
   /* claims as a tree, because a claim IS a tree */
   .claim{padding:12px 14px;border:1px solid var(--line);border-radius:9px;margin-bottom:11px;
-         max-width:var(--measure);font-family:var(--prose);font-size:var(--fs);line-height:var(--lh)}
+         max-width:var(--measure);font-family:var(--prose);font-size:var(--fs);line-height:var(--lh);
+         margin-left:max(0px, calc((100% - var(--measure)) / 2));margin-right:auto}
+  details.deps{max-width:var(--measure);margin-left:max(0px, calc((100% - var(--measure)) / 2))}
+  details.deps .claim{margin-left:0;margin-right:0;max-width:none}
   .claim.indep{border-color:var(--accent);background:var(--accent-soft)}
   .claim.dep{opacity:.94}
   .claim .tag{font:700 11px/1.4 var(--mono);color:var(--accent);margin-bottom:5px;
@@ -130,8 +138,12 @@
   /* figures */
   .figtop{flex:1 1 auto;display:flex;align-items:center;justify-content:center;
           background:var(--figbg);overflow:auto;min-height:0;position:relative}
+  /* A patent sheet is portrait; the pane is landscape. Fit-to-page leaves the
+     sides empty on a wide screen, so the fit is a control, not a fixed choice. */
   .figtop img{max-width:100%;max-height:100%;display:block;cursor:zoom-in}
+  .figtop img.fitw{max-width:100%;max-height:none;width:100%;align-self:flex-start}
   .figtop img.zoom{max-width:none;max-height:none;width:210%;cursor:zoom-out}
+  .figsrc button.on{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
   .figsrc{position:absolute;top:8px;right:10px;font:11px/1.5 var(--mono);color:var(--muted);
           background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:2px 9px;
           opacity:.92;display:flex;gap:7px;align-items:center}
@@ -198,6 +210,27 @@
   .ctrl .row{grid-column:1/-1;display:flex;gap:14px;flex-wrap:wrap;color:var(--muted)}
   .ctrl .row label{display:inline-flex;gap:5px;align-items:center;cursor:pointer;color:var(--ink)}
 
+  /* ---------- work in progress: never leave the user watching nothing ---------- */
+  .netbar{flex:0 0 2px;height:2px;background:transparent;overflow:hidden}
+  .netbar.on{background:var(--accent-soft)}
+  .netbar.on::after{content:"";display:block;height:2px;width:38%;background:var(--accent);
+                    animation:netslide 1.15s ease-in-out infinite}
+  @keyframes netslide{0%{transform:translateX(-100%)}100%{transform:translateX(360%)}}
+  .steps{display:flex;flex-direction:column;gap:9px;font-size:13.5px;margin-top:6px}
+  .step{display:flex;gap:10px;align-items:center;color:var(--muted)}
+  .step .dot{flex:0 0 8px;width:8px;height:8px;border-radius:50%;background:var(--line)}
+  .step.on{color:var(--ink)}
+  .step.on .dot{background:var(--accent);animation:pulse 1s ease-in-out infinite}
+  .step.done .dot{background:var(--accent)}
+  .step.done{color:var(--muted)}
+  @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.72)}}
+  .elapsed{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:14px}
+  .toast{position:fixed;bottom:22px;left:50%;translate:-50% 0;z-index:99;
+         background:var(--panel);border:1px solid var(--line);border-radius:11px;
+         padding:11px 17px;box-shadow:0 12px 34px rgba(0,0,0,.28);
+         font-size:13px;max-width:min(560px,90vw);line-height:1.6}
+  .toast b{font-family:var(--mono);font-weight:600}
+
   /* welcome / error */
   .center{flex:1 1 auto;display:flex;align-items:center;justify-content:center;padding:30px}
   .box{max-width:620px;background:var(--panel);border:1px solid var(--line);
@@ -220,6 +253,7 @@
   <button id="refresh" class="ghost" title="略過本地庫，重新抓取">重抓</button>
   <button class="chip" id="libchip" popovertarget="pop-lib">庫 <b>0</b></button>
 </div>
+<div id="netbar" class="netbar"></div>
 
 <div id="docbar" class="docbar" style="display:none"></div>
 <div id="stage" class="reader"></div>
@@ -242,7 +276,7 @@
         <label><input id="c-num" type="checkbox"> 段落編號</label>
         <label><input id="c-serif" type="checkbox"> 襯線字體</label>
         <label><input id="c-numeral" type="checkbox"> 元件編號高亮</label>
-        <button class="chip" id="c-reset">回到預設</button>
+        <button class="chip" id="c-reset" title="字級、行距、行寬回到預設，左右分欄回到依視窗自動計算">回到預設（含版面）</button>
       </div>
     </div>
   </div>
@@ -259,6 +293,10 @@ const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g, c => ({'&':'&amp;','<
 let CARD = null, TABKEY = 'abstract';
 // One figure model for both sources: Google's direct PNGs and EPO's page service.
 let FIGS = {mode:'none', urls:[], link:'', pages:0, i:0, google:[], ops:null};
+// How a drawing sheet fills the pane: 'page' (whole sheet) or 'width' (fill the
+// pane and scroll) — the second exists because a portrait sheet fitted to height
+// leaves a third of a 1920 pane empty. Persisted like the other reading settings.
+let FIT = (() => { try{ return localStorage.getItem('pg.figfit') || 'page'; }catch(e){ return 'page'; } })();
 
 /* ---------------- reading preferences ---------------- */
 const READ_DEFAULTS = {fs:16, lh:1.8, measure:68, gap:1.0, numbers:true, serif:true, numerals:false};
@@ -281,6 +319,9 @@ function applyRead(save){
   $('#c-num').checked = READ.numbers;
   $('#c-serif').checked = READ.serif;
   $('#c-numeral').checked = READ.numerals;
+  // Type size, measure and the number gutter all change how wide the column is,
+  // so the automatic pane width has to follow them.
+  if(typeof applyIdealSplit === 'function') applyIdealSplit();
   if(save !== false) try{ localStorage.setItem('pg.read', JSON.stringify(READ)); }catch(e){}
 }
 function wireRead(){
@@ -290,7 +331,12 @@ function wireRead(){
   });
   bind('#c-fs','fs',1); bind('#c-lh','lh',1); bind('#c-me','measure',1); bind('#c-gp','gap',1);
   bind('#c-num','numbers',0); bind('#c-serif','serif',0); bind('#c-numeral','numerals',0);
-  $('#c-reset').onclick = () => { READ = {...READ_DEFAULTS}; applyRead(); };
+  $('#c-reset').onclick = () => {
+    READ = {...READ_DEFAULTS};
+    try{ localStorage.removeItem('pg.split'); }catch(e){}   // back to the automatic width
+    applyRead();
+    applyIdealSplit(true);
+  };
   applyRead(false);
 }
 
@@ -400,7 +446,11 @@ function renderDocBar(c){
       <a href="${esc(c.links.patentscope)}" target="_blank" rel="noopener">PATENTSCOPE ↗</a></div>`);
 
   // EPO state is a first-class chip: it says what OPS added, or why it added nothing.
-  if(ops){
+  if(ops && ops.pending){
+    add(`EPO <b>取得中…</b>`, 'EPO OPS 補強',
+        `<p class="reason">正在向 EPO 詢問這件有哪些圖式頁與原文件（一次呼叫，不會抓圖）。</p>`,
+        {epo:true});
+  } else if(ops){
     const secs = ops.fullimage && ops.fullimage.sections && ops.fullimage.sections.length
       ? `<dl>${ops.fullimage.sections.map(s=>`<dt>${esc(s.name)}</dt><dd>第 ${s.start} 頁起</dd>`).join('')}</dl>`
       : '';
@@ -425,9 +475,12 @@ function renderDocBar(c){
   } else if(ops && ops.available && ops.fullimage){
     const n = ops.fullimage.pages;
     pdf = `<a class="chip epo" style="text-decoration:none" target="_blank" rel="noopener"
-              title="Google 沒有此件 PDF。改由 EPO 逐頁取回後合併，${n} 頁約需 ${Math.ceil(n*0.7)} 秒。"
+              data-epopdf="1" data-pages="${n}" data-secs="${Math.ceil(n*0.8)}"
+              title="Google 沒有此件 PDF。改由 EPO 逐頁取回後合併，${n} 頁約需 ${Math.ceil(n*0.8)} 秒。"
               href="/api/ops/pdf?link=${encodeURIComponent(ops.fullimage.link)}&pages=${n}&name=${encodeURIComponent(c.number)}"
            >原文件 PDF · EPO ${n} 頁 ↗</a>`;
+  } else if(ops && ops.pending){
+    pdf = `<span class="chip">原文件 PDF · EPO 確認中…</span>`;
   } else {
     pdf = `<span class="chip warn" title="${esc(reasonOf('pdf_link')||'')}">無 PDF</span>`;
   }
@@ -529,6 +582,7 @@ function renderReader(c){
   if(want && TAB[want]) showTab(want, TAB);
   renderFigures(c);
   wireSplitter();
+  applyIdealSplit();
 }
 
 function showTab(key, TAB){
@@ -600,7 +654,10 @@ function renderFigures(c, forceMode){
       <div class="figtop">
         <img id="figbig" alt="圖式 1">
         <div class="figwait" id="figwait">載入中…</div>
-        <div class="figsrc">${esc(srcLabel)}${both?`<button id="figswap">${
+        <div class="figsrc">${esc(srcLabel)}
+          <button data-fit="page" class="${FIT==='page'?'on':''}" title="整張圖頁都看得到">頁面</button>
+          <button data-fit="width" class="${FIT==='width'?'on':''}" title="填滿寬度，上下捲動（寬螢幕用）">寬度</button>
+          ${both?`<button id="figswap">${
             FIGS.mode==='google'?'改用 EPO 高解析':'改用 Google'}</button>`:''}</div>
         <div class="fighint" id="fighint" style="display:none"></div>
       </div>
@@ -620,7 +677,10 @@ function figShow(i, hint){
   const big = $('#figbig'), wait = $('#figwait');
   if(!big) return;
   big.classList.remove('zoom');
-  if(wait) wait.style.display = 'flex';
+  if(wait){
+    wait.textContent = FIGS.mode === 'ops' ? `向 EPO 取第 ${FIGS.i+1} 頁…` : '載入中…';
+    wait.style.display = 'flex';
+  }
   big.src = figSrc(FIGS.i);
   $('#fign').textContent = `${FIGS.i+1} / ${FIGS.pages}`;
   const strip = $('#thumbs') || $('#pagestrip');
@@ -640,6 +700,14 @@ function figShow(i, hint){
 
 function wireFigures(){
   const big = $('#figbig'), wait = $('#figwait');
+  big.classList.toggle('fitw', FIT === 'width');
+  document.querySelectorAll('.figsrc [data-fit]').forEach(b => b.onclick = () => {
+    FIT = b.dataset.fit;
+    try{ localStorage.setItem('pg.figfit', FIT); }catch(e){}
+    document.querySelectorAll('.figsrc [data-fit]').forEach(x => x.classList.toggle('on', x === b));
+    big.classList.remove('zoom');
+    big.classList.toggle('fitw', FIT === 'width');
+  });
   big.onload = () => { if(wait) wait.style.display='none'; };
   // A drawing that 404/403s must say so, never render as a broken-image glyph.
   big.onerror = () => {
@@ -675,6 +743,35 @@ function claimJump(num){
   setTimeout(()=>el.classList.remove('flash'), 1400);
 }
 
+/* ---------------- layout: size the text pane to its column ----------------
+   The reading column is capped at the measure on purpose, so on a 1920 or 2560
+   screen a fixed 55% text pane leaves a wide dead strip beside the text while
+   the drawing — the one thing that genuinely uses every pixel — is squeezed.
+   The default split is therefore derived from the column's real width and the
+   remainder goes to the figures. A split the user has dragged always wins. */
+function measurePx(){
+  const probe = document.createElement('div');
+  probe.style.cssText = 'position:absolute;visibility:hidden;height:0;' +
+                        'font-family:var(--prose);font-size:var(--fs);width:var(--measure)';
+  document.body.appendChild(probe);
+  const width = probe.offsetWidth;
+  probe.remove();
+  return width;
+}
+function idealSplit(){
+  const stage = $('#stage');
+  const total = (stage && stage.getBoundingClientRect().width) || window.innerWidth || 1920;
+  const gutter = READ.numbers ? READ.fs * 3.6 : 0;   // --gutter is 3.6em of --fs
+  const column = measurePx() + gutter + 52;          // + .body padding + slack
+  return Math.min(70, Math.max(30, column / total * 100));
+}
+function applyIdealSplit(force){
+  if(!force){
+    try{ if(localStorage.getItem('pg.split')) return; }catch(e){}
+  }
+  document.documentElement.style.setProperty('--split', idealSplit().toFixed(1));
+}
+
 function wireSplitter(){
   const bar=$('#split'), reader=$('#stage');
   let dragging=false;
@@ -692,11 +789,21 @@ function wireSplitter(){
   });
   const stop = () => { dragging=false; bar.classList.remove('drag'); };
   bar.addEventListener('pointerup', stop); bar.addEventListener('pointercancel', stop);
-  bar.addEventListener('dblclick', () => apply(55));
+  // Double click returns to the automatic width rather than to a fixed 55%,
+  // and forgets the manual ratio so the layout follows the window again.
+  bar.addEventListener('dblclick', () => {
+    try{ localStorage.removeItem('pg.split'); }catch(e){}
+    applyIdealSplit(true);
+  });
 }
 
 /* ---------------- EPO enrichment ---------------- */
 async function enrich(c){
+  // The card is already readable at this point; this second phase is announced
+  // rather than run silently, because it is what fills the drawing pane.
+  CARD.ops = {pending:true};
+  renderDocBar(CARD);
+  $('#netbar').classList.add('on');
   try{
     const r = await fetch('/api/enrich?q=' + encodeURIComponent(c.number));
     const e = await r.json();
@@ -707,7 +814,13 @@ async function enrich(c){
     // Google's images stay put, but the EPO high-resolution option now exists,
     // and a document Google had nothing for finally gets its sheets.
     renderFigures(CARD, FIGS.mode === 'none' ? undefined : FIGS.mode);
-  }catch(err){ /* enrichment is additive: its failure must not disturb the card */ }
+  }catch(err){
+    // Enrichment is additive: its failure must not disturb the card, but it
+    // must not vanish silently either.
+    if(CARD) { CARD.ops = {available:false, reason:'EPO 補強請求失敗：' + err.message}; renderDocBar(CARD); }
+  }finally{
+    $('#netbar').classList.remove('on');
+  }
 }
 
 async function loadInpadoc(number){
@@ -734,6 +847,56 @@ async function loadInpadoc(number){
   }
 }
 
+/* ---------------- progress ----------------
+   A query that shows nothing for two seconds reads as a broken tool. Every wait
+   in this app now says what it is waiting for and how long it has been waiting;
+   none of it is a fake progress bar — the steps are the real phases. */
+const STEPS = [
+  ['parse', '解析號碼格式（本地）'],
+  ['fetch', '向 Google Patents 取得單件頁：標題、摘要、說明書、請求項、分類'],
+  ['epo',   '向 EPO OPS 取得圖式與原文件清單'],
+];
+let busyTimer = null, busyStart = 0, toastTimer = null;
+
+function stepsHTML(active){
+  const at = STEPS.findIndex(s => s[0] === active);
+  return STEPS.map(([key, label], i) =>
+    `<div class="step ${i < at ? 'done' : i === at ? 'on' : ''}">
+       <span class="dot"></span><span>${esc(label)}</span></div>`).join('');
+}
+function busyOn(query, phase){
+  $('#netbar').classList.add('on');
+  $('#go').disabled = true; $('#go').textContent = '查詢中…';
+  $('#docbar').style.display = 'none'; $('#pops').innerHTML = '';
+  $('#stage').innerHTML = `<div class="center"><div class="box">
+      <h2>查詢中 <span class="mono">${esc(query)}</span></h2>
+      <div class="steps">${stepsHTML(phase || 'fetch')}</div>
+      <div class="elapsed" id="elapsed">已等待 0.0 秒</div>
+      <p style="margin-top:12px">一件通常 1–3 秒。說明書很長的老案（40 萬字元）會久一點，
+         查過的件會直接從本地專利庫回來。</p>
+    </div></div>`;
+  busyStart = performance.now();
+  clearInterval(busyTimer);
+  busyTimer = setInterval(() => {
+    const el = $('#elapsed'); if(!el) return;
+    const s = (performance.now() - busyStart) / 1000;
+    el.textContent = `已等待 ${s.toFixed(1)} 秒` + (s > 6 ? '　（比平常久，來源可能正在慢速回應）' : '');
+  }, 100);
+}
+function busyOff(){
+  clearInterval(busyTimer); busyTimer = null;
+  $('#netbar').classList.remove('on');
+  $('#go').disabled = false; $('#go').textContent = '查詢';
+}
+function toast(html, ms = 5000){
+  let t = $('#toast');
+  if(!t){ t = document.createElement('div'); t.id = 'toast'; t.className = 'toast';
+          document.body.appendChild(t); }
+  t.innerHTML = html; t.style.display = '';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.style.display = 'none'; }, ms);
+}
+
 /* ---------------- flow ---------------- */
 function welcome(msg){
   $('#docbar').style.display='none'; $('#pops').innerHTML=''; CARD=null;
@@ -755,7 +918,7 @@ function render(c){ CARD=c; renderDocBar(c); renderReader(c); enrich(c); }
 
 async function go(refresh){
   const q=$('#q').value.trim(); if(!q) return;
-  $('#go').disabled=true;
+  busyOn(q, 'fetch');
   try{
     const r = await fetch(`/api/patent?q=${encodeURIComponent(q)}${refresh?'&refresh=true':''}`);
     const d = await r.json();
@@ -769,7 +932,7 @@ async function go(refresh){
                                      (tab ? '&tab=' + encodeURIComponent(tab) : ''));
     }
   } catch(e){ welcome('連線失敗：' + e.message); }
-  finally{ $('#go').disabled=false; }
+  finally{ busyOff(); }
 }
 
 async function loadLib(){
@@ -785,6 +948,14 @@ async function loadLib(){
 }
 
 document.addEventListener('click', e => {
+  // A 25-page original is 25 metered requests: say so instead of opening a tab
+  // that spins for twenty seconds with no explanation.
+  const epoPdf = e.target.closest('a[data-epopdf]');
+  if(epoPdf){
+    toast(`EPO 正在逐頁取回 <b>${esc(epoPdf.dataset.pages)}</b> 頁並合併，約
+           <b>${esc(epoPdf.dataset.secs)}</b> 秒；完成後會在剛開的新分頁顯示。
+           同一件第二次點會直接由本機快取取出。`, 9000);
+  }
   const fig = e.target.closest('a.figref');
   if(fig){ e.preventDefault(); figJump(parseInt(fig.dataset.fig,10)); return; }
   const clm = e.target.closest('a.claimref');
@@ -809,6 +980,12 @@ document.addEventListener('keydown', e => {
 $('#go').onclick = () => go(false);
 $('#refresh').onclick = () => go(true);
 $('#q').addEventListener('keydown', e => { if(e.key==='Enter') go(false); });
+
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => applyIdealSplit(), 120);   // no-op if the user set one
+});
 
 const saved = localStorage.getItem('pg.split');
 if(saved) document.documentElement.style.setProperty('--split', saved);

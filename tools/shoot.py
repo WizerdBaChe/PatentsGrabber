@@ -36,8 +36,11 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("number")
     ap.add_argument("out")
-    ap.add_argument("--width", type=int, default=1440)
-    ap.add_argument("--height", type=int, default=900)
+    # Defaults match the machine this is actually read on (FHD); QHD is the other
+    # size that matters here. Verifying at 1024/1440 hid a wide-screen layout
+    # problem that only shows up when the pane is much wider than the text column.
+    ap.add_argument("--width", type=int, default=1920)
+    ap.add_argument("--height", type=int, default=1080)
     ap.add_argument("--dark", action="store_true")
     ap.add_argument("--base", default="http://127.0.0.1:8000")
     ap.add_argument("--delay", type=int, default=6000, help="ms to wait for fetch+render")

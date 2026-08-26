@@ -68,6 +68,8 @@ The claim to beat is narrow and honest: Google Patents, Espacenet and PATENTSCOP
 | **R-5** | Claims render as a tree: preamble, then one indented block per limitation; `claim N` cross-references are clickable and scroll to that claim | F-7 |
 | **R-6** | Plain, copyable text is preserved for every structured view — structure must never cost the user their copy-paste | CIM §1 (the original pain) |
 | **R-7** | Reference numerals (`figure-callout`) get a subtle marker; off by default | F-6 |
+| **R-8** | **No silent waiting.** Every wait over ~300 ms names what it is waiting for and how long it has been waiting. The phases shown are the real ones (parse → Google Patents → EPO inquiry); no fake progress | user ruling 2026-08-26 |
+| **R-9** | **The layout follows the window.** The reading column is capped at the measure for readability, so the text pane is sized to the column and the remainder goes to the drawing; the column centres in its pane. Verified at 1920×1080 and 2560×1440, not at 1024 | user ruling 2026-08-26 — a fixed 55% split wasted ~800 px on a 2560 screen |
 
 **Non-goals for §4**: no re-writing, summarizing, or translating of patent text; no AI-generated reading aids. Structure comes from the source markup or it is not shown.
 
@@ -98,6 +100,19 @@ Machine-checkable:
 | No-credential degradation | card still builds (115 blocks); enrich/inpadoc/page all return an actionable reason, nothing raises |
 | Structure in the DOM | `US20250383260A1`: 86 paragraphs, 86 gutter numbers, 3 headings, 42 clickable figure references, 20 claims / 24 limitation blocks |
 | Regression, accepted Stage 0 behaviour | 294-thumbnail case: all `loading=lazy`, strip scrolls internally (2736→499 px), page does **not** overflow horizontally at 1440×900 (`scrollWidth == clientWidth == 1440`) |
+
+### 5.2 Wide-screen layout and progress feedback (2026-08-26, second pass)
+
+| Check | Result |
+|---|---|
+| R-9 at **2560×1440** | split auto-computes to **30.0 %** → text pane 768 px, figure pane 1785 px, column 544 px centred (gaps 105/120 px). Before: fixed 55 % → 1408 px pane around the same 544 px column, i.e. ~800 px dead |
+| R-9 at **1920×1080** | split **34.0 %** → text pane 653 px, figure pane 1260 px, column 540 px, page overflow 0 px |
+| Layout follows the reading controls | measure 68→100 ch: pane 768→909 px; then size 16→20 px: pane →1124 px; 回到預設 returns to 768 px. A manually dragged split still wins; double-click on the splitter (or 回到預設) restores automatic |
+| Drawing fit control | fit-page 691×894 in a 1259 px pane (569 px slack) → fit-width 1244×1610, slack 15 px, top not clipped, scrolls vertically; the choice survives a page change and is persisted |
+| R-8 during a lookup | activity bar animating, button disabled and labelled 查詢中…, heading names the number, step 1 marked done / step 2 active / step 3 pending, elapsed counter ticking (0.6 s sample) |
+| R-8 during EPO enrichment | chip observed passing through **`EPO 取得中…`** → `EPO 16圖/25頁`; PDF chip shows `原文件 PDF · EPO 確認中…` until the inquiry answers |
+| R-8 on the 25-page original | clicking it raises: "EPO 正在逐頁取回 **25** 頁並合併，約 **20** 秒…" |
+| R-8 per drawing page | the overlay says `向 EPO 取第 n 頁…` rather than a bare spinner |
 
 Human-eye (must be confirmed in the real browser; see the delivery checklist):
 
