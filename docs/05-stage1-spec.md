@@ -191,6 +191,22 @@ Every gate re-run from a clean tree at `f846c40`, so the numbers below describe 
 
 **Not re-verified in this pass, by nature**: the human-eye items (§5 items 5–7) and the wide-screen layout numbers in §5.2. They were confirmed in the browser during their own rounds and no code touching layout or reading defaults has changed since; a real window drag remains a human check (R-10 instrument note).
 
+### 5.6 Gates added after the close-out (2026-08-27)
+
+`docs/06-stage1-review.md` traced every rule to the gate that guards it and found four
+holes. All four are now closed. The acceptance list in §5 therefore grows by four
+runnable checks — none of which changes any behaviour above:
+
+| Gate | Closes | First run |
+|---|---|---|
+| `tools/check_freshness.py` | `check_reading.py` reads archived HTML, so a live markup change left it green | 3 sample documents, every metric identical to the archive; calibration catches a stripped page at `blocks: 65 -> 7` |
+| `tests/test_extractor_fingerprint.py` | the schema-bump rule had no mechanism, only a sentence in `CLAUDE.md` | 4/4; verified to fire on a real extractor edit and to ignore comment-only edits |
+| `tools/check_layout.py` | R-9/R-10 were measured once by eye; they are numbers, so they are gated now | 13/13 at 1920 and 2560, reproducing §5.2's pane widths and type pairs, with two calibrations |
+| `tools/run_gates.py` | five gates nobody could run in one go, printing scores in three different units | all 8 gates clear; the summary states each score's unit |
+
+**`python tools/run_gates.py` is now the entry point** for §5's machine-checkable items
+(`--net` adds the page-fetching gates, `--all` adds the two that spend OPS quota).
+
 ---
 
 ## 6. 本輪範圍決定與待裁決事項

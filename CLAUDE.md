@@ -41,6 +41,11 @@ library, not only the next lookup.
 extractors produce.** Both were caught the hard way: a claim-parser fix and an
 abstract-cleanup fix each landed while a stale card sat in the library.
 
+This is no longer only a sentence: `tests/test_extractor_fingerprint.py` pins a
+fingerprint of the extractors' executable structure (AST, docstrings stripped —
+comments and formatting do not trip it) next to each constant. Change an
+extractor without bumping, and it fails and tells you what to do.
+
 ## Number formats are per record, not per rule
 
 Which serial width OPS holds a US publication under differs by document
@@ -77,6 +82,12 @@ re-tried on the next read.
 - `docs/05-stage1-spec.md` — Stage 1 scope, settled facts (F-1…F-8), acceptance
 - `docs/06-stage1-review.md` — which rule is guarded by which gate, and where the
   gates are blind. Read it before assuming a green run proves something.
-- Gates: `tools/check_reading.py` (structure added without losing text, with
-  controls both ways and a self-calibration case), `tools/verify_ops.py`,
-  `tools/smoke_service.py`, `tests/test_ops_number_formats.py`
+- Gates: run them with **`python tools/run_gates.py`** (`--net` adds the ones that
+  fetch pages, `--all` adds the two that spend OPS quota). It also states what
+  each score's denominator is, because they are not the same unit.
+  Individually: `tools/check_reading.py` (structure added without losing text,
+  controls both ways, self-calibrating), `tools/check_layout.py` (R-9/R-10 over
+  DevTools at 1920 and 2560), `tools/check_freshness.py` (the archive still
+  matches the live source), `tools/verify_ops.py`, `tools/check_search.py`,
+  `tools/smoke_service.py`, `tests/test_ops_number_formats.py`,
+  `tests/test_extractor_fingerprint.py`
