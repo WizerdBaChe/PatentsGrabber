@@ -231,6 +231,48 @@
          font-size:13px;max-width:min(560px,90vw);line-height:1.6}
   .toast b{font-family:var(--mono);font-weight:600}
 
+  /* ---------- results list: the second entry point, leading back to the card ---------- */
+  .results{flex:1 1 auto;display:flex;flex-direction:column;min-height:0;min-width:0}
+  .rhead{flex:0 0 auto;padding:12px 20px 10px;border-bottom:1px solid var(--line);background:var(--panel)}
+  .rtitle{font-size:15px;font-weight:600;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+  .rtitle .n{font-family:var(--mono);color:var(--accent);font-size:14px}
+  .rmeta{font-size:12px;color:var(--muted);margin-top:5px;display:flex;gap:14px;flex-wrap:wrap}
+  .rmeta code{font-family:var(--mono);font-size:11.5px;color:var(--warn)}
+  .rctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px}
+  .rctl label{font-size:12px;color:var(--muted);display:inline-flex;gap:5px;align-items:center;cursor:pointer}
+  .rbody{flex:1 1 auto;display:flex;min-height:0;overflow:hidden}
+  .rlist{flex:1 1 auto;overflow:auto;padding:6px 12px 30px;min-width:0}
+  .rrow{display:grid;grid-template-columns:auto 1fr;gap:2px 16px;width:100%;text-align:left;
+        background:transparent;color:var(--ink);border:none;border-bottom:1px solid var(--line);
+        border-radius:0;padding:11px 8px;cursor:pointer;font-family:inherit;font-size:13.5px}
+  .rrow:hover{background:var(--accent-soft)}
+  .rrow.closed{cursor:default;opacity:.72}
+  .rrow.closed:hover{background:transparent}
+  .rrow .rid{grid-row:1/span 3;font-family:var(--mono);font-size:12px;color:var(--accent);
+             white-space:nowrap;padding-top:1px}
+  .rrow .rid small{display:block;color:var(--muted);font-size:11px;margin-top:3px}
+  .rrow .rt{font-weight:600;line-height:1.45}
+  .rrow .ra{color:var(--muted);font-size:12.5px}
+  .rrow .rx{color:var(--muted);font-size:12.5px;line-height:1.5;
+            display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .rrow .why{color:var(--warn);font-size:12px}
+  .rside{flex:0 0 320px;border-left:1px solid var(--line);overflow:auto;padding:12px 14px 30px;
+         background:var(--panel)}
+  .rside h3{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);
+            margin:0 0 8px;font-weight:600}
+  .variant{display:block;width:100%;text-align:left;background:transparent;color:var(--ink);
+           border:1px solid var(--line);border-radius:8px;padding:7px 10px;margin-bottom:6px;
+           font-family:inherit;font-size:12.5px;cursor:pointer;line-height:1.5}
+  .variant:hover{border-color:var(--accent);background:var(--accent-soft)}
+  .variant b{font-family:var(--mono);color:var(--accent);margin-right:7px}
+  .variant small{display:block;color:var(--muted);font-size:11.5px;margin-top:2px}
+  .rpage{flex:0 0 auto;display:flex;gap:10px;align-items:center;justify-content:center;
+         padding:9px;border-top:1px solid var(--line);background:var(--panel);font-size:12.5px;
+         color:var(--muted);font-family:var(--mono)}
+  .rpage button{padding:4px 12px;background:transparent;color:var(--ink);border-color:var(--line)}
+  @media (max-width:1100px){ .rbody{flex-direction:column} .rside{flex:0 0 auto;border-left:none;
+         border-top:1px solid var(--line);max-height:34dvh} }
+
   /* welcome / error */
   .center{flex:1 1 auto;display:flex;align-items:center;justify-content:center;padding:30px}
   .box{max-width:620px;background:var(--panel);border:1px solid var(--line);
@@ -248,7 +290,7 @@
 
 <div class="searchbar">
   <div class="brand">PatentsGrabber<small>Stage 1 · US · Google Patents + EPO OPS</small></div>
-  <input id="q" type="text" placeholder="US20250383260A1 · US 2025/0383260 A1 · 6,285,999" autofocus>
+  <input id="q" type="text" placeholder="專利號碼（US20250383260A1 · 6,285,999）或公司名（Corning · in=Larry Page）" autofocus>
   <button id="go">查詢</button>
   <button id="refresh" class="ghost" title="略過本地庫，重新抓取">重抓</button>
   <button class="chip" id="libchip" popovertarget="pop-lib">庫 <b>0</b></button>
@@ -513,17 +555,33 @@ function renderDocBar(c){
     pdf = `<span class="chip warn" title="${esc(reasonOf('pdf_link')||'')}">無 PDF</span>`;
   }
   const store = c._from_store ? `<span class="chip" title="來自本地庫，未重新抓取">庫存 ${esc((c._fetched_at||'').slice(0,10))}</span>` : '';
+  const opsOnly = c._ops_only
+    ? `<span class="chip warn" title="${esc(c._ops_only_reason||'')}">書目來自 EPO OPS · 無全文</span>` : '';
+  const back = RETURN_TO
+    ? `<button class="chip state" id="backtolist" title="不會再打一次 EPO，結果留在記憶體裡">← ${
+        esc(RETURN_TO.field_label||'')}「${esc(RETURN_TO.query||'')}」${
+        (RETURN_TO.total||0).toLocaleString()} 件</button>` : '';
 
   $('#docbar').innerHTML = `
     <div class="titleline">
+      ${back}
       <span class="chip id">${esc(c.number)}</span>
       <span class="chip state">${c.kind_of_document==='grant'?'公告':'公開'} · ${esc(c.legal_status||'—')}</span>
       <h1 id="title" title="點擊展開完整標題">${esc(c.title)}</h1>
     </div>
-    <div class="chips">${C.join('')}<span class="sep"></span>${pdf}${store}</div>`;
+    <div class="chips">${C.join('')}<span class="sep"></span>${pdf}${opsOnly}${store}</div>`;
   $('#pops').innerHTML = P.join('');
   $('#docbar').style.display = '';
   $('#title').onclick = e => e.currentTarget.classList.toggle('open');
+  const backBtn = $('#backtolist');
+  if(backBtn) backBtn.onclick = () => {
+    const list = RETURN_TO;
+    RETURN_TO = null;
+    $('#q').value = list.query || '';
+    renderResults(list);
+    history.replaceState(null, '', `?q=${encodeURIComponent(list.query||'')}&field=${
+      list.field||'pa'}&us=${list.us_only?1:0}${list.begin>1?'&start='+list.begin:''}`);
+  };
   const chip = $('#inpadocchip');
   if(chip) chip.addEventListener('click', () => loadInpadoc(c.number), {once:true});
   wireAnchors();
@@ -552,11 +610,20 @@ function claimHTML(x){
       <div class="lead">${lead}</div>${parts}</div>`;
 }
 
+// A field that is absent for a KNOWN reason shows the reason, not a blank pane.
+function absentPane(field, fallback){
+  const why = reasonOf(field) || fallback;
+  return `<div class="doc"><p class="para" style="color:var(--muted)">${esc(why)}</p>
+      <p class="para" style="color:var(--muted);font-size:.9em">
+        右側圖式區可以翻原文件掃描；書目、分類、申請人來自 EPO OPS。</p></div>`;
+}
+
 function tabsOf(c){
   const claims = c.claims||[], indep = claims.filter(x=>!x.dependent), dep = claims.filter(x=>x.dependent);
   const blocks = c.description_blocks || [];
   const descHTML = blocksHTML(blocks)
-    || `<div class="doc flat">${esc(c.description||'（無說明書全文）')}</div>`;
+    || (c.description ? `<div class="doc flat">${esc(c.description)}</div>`
+                      : absentPane('description', '此件沒有可取用的說明書全文。'));
   const structured = blocks.length ? `${blocks.length} 段` : '未分段';
   return {
     abstract:{label:'摘要', note:`${(c.abstract||'').length} 字元`,
@@ -566,7 +633,8 @@ function tabsOf(c){
             html: claims.length
               ? indep.map(claimHTML).join('') +
                 (dep.length?`<details class="deps" open><summary>附屬項 ${dep.length} 項（點擊收合）</summary>${dep.map(claimHTML).join('')}</details>`:'')
-              : `<div class="doc flat">${esc(c.claims_text||'（無）')}</div>`},
+              : (c.claims_text ? `<div class="doc flat">${esc(c.claims_text)}</div>`
+                               : absentPane('claims', '此件沒有可取用的請求項文字。'))},
     description:{label:'說明書',
                  note:`${(c.description||'').length.toLocaleString()} 字元 · ${structured}`,
                  html: descHTML}
@@ -880,9 +948,9 @@ async function loadInpadoc(number){
    in this app now says what it is waiting for and how long it has been waiting;
    none of it is a fake progress bar — the steps are the real phases. */
 const STEPS = [
-  ['parse', '解析號碼格式（本地）'],
-  ['fetch', '向 Google Patents 取得單件頁：標題、摘要、說明書、請求項、分類'],
-  ['epo',   '向 EPO OPS 取得圖式與原文件清單'],
+  ['parse', '判斷輸入是號碼還是名稱（本地）'],
+  ['fetch', '取得資料：號碼 → Google Patents 單件頁；名稱 → EPO OPS 檢索'],
+  ['epo',   '整理：圖式與原文件清單／申請人名稱變體'],
 ];
 let busyTimer = null, busyStart = 0, toastTimer = null;
 
@@ -925,18 +993,137 @@ function toast(html, ms = 5000){
   toastTimer = setTimeout(() => { t.style.display = 'none'; }, ms);
 }
 
+/* ---------------- results list ----------------
+   The second entry point (CIM §3) deliberately leads back to the first: a row
+   opens the same patent card, so there is no second presentation system. */
+let SEARCH = null;            // the last result set, so a card can return to it
+let RETURN_TO = null;         // set when a card was opened FROM a result row
+const FIELDS = {pa:'申請人', in:'發明人', ta:'標題／摘要', ti:'標題', ab:'摘要'};
+const fmtDate = d => (d && d.length === 8) ? `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6)}` : (d||'');
+
+function renderResults(d){
+  SEARCH = d;
+  CARD = null;
+  $('#docbar').style.display = 'none';
+  $('#pops').innerHTML = '';
+
+  if(!d.available || !d.total){
+    $('#stage').innerHTML = `<div class="center"><div class="box${d.available?'':' err'}">
+        <h2>${d.available ? '沒有符合的結果' : '檢索無法執行'}</h2>
+        <p>${esc(d.reason || '')}</p>
+        ${d.cql?`<p class="mono" style="font-size:12px">送出的查詢：${esc(d.cql)}</p>`:''}
+        <p>可以改查發明人（輸入 <code>in=Larry Page</code>）或改用標題／摘要（<code>ta=fiber array</code>）。</p>
+      </div></div>`;
+    return;
+  }
+
+  const rows = (d.results||[]).map(r => {
+    const head = `<span class="rid">${esc(r.number)}<small>${esc(fmtDate(r.date))}</small></span>`;
+    const body = `<span class="rt">${esc(r.title || '（此件未提供標題）')}</span>
+       <span class="ra">${esc((r.applicants||[]).join('；') || '—')}${
+         r.inventors && r.inventors.length ? ' · 發明人 ' + esc(r.inventors.slice(0,3).join('、')) : ''}</span>
+       ${r.abstract ? `<span class="rx">${esc(r.abstract)}</span>`
+                    : `<span class="rx">（此筆未附摘要）</span>`}`;
+    return r.openable
+      ? `<button class="rrow" data-number="${esc(r.number)}">${head}${body}</button>`
+      : `<div class="rrow closed">${head}${body}
+           <span class="why">本工具目前只讀美國案，這件是 ${esc(r.country||'?')} 案 —
+             <a href="https://worldwide.espacenet.com/patent/search?q=pn%3D${encodeURIComponent(r.number)}"
+                target="_blank" rel="noopener">在 Espacenet 開啟 ↗</a></span></div>`;
+  }).join('');
+
+  // BR-8: the name variants are the point, not a footnote. They say out loud
+  // that one company is many strings and that this list is only a sample.
+  const variants = (d.applicant_variants||[]).map(v =>
+    `<button class="variant" data-refine="${esc((v.originals&&v.originals[0]&&v.originals[0].name) || v.name)}">
+       <b>${v.count}</b>${esc(v.name)}
+       ${(v.originals||[]).length ? `<small>申請時寫法：${
+         esc(v.originals.slice(0,3).map(o=>o.name).join(' · '))}</small>` : ''}</button>`).join('');
+
+  const last = Math.min(d.begin + d.fetched - 1, d.reachable);
+  $('#stage').innerHTML = `
+    <div class="results">
+      <div class="rhead">
+        <div class="rtitle">${esc(d.field_label)}「${esc(d.query)}」
+          <span class="n">${d.total.toLocaleString()} 件</span></div>
+        <div class="rmeta">
+          <span>顯示第 ${d.begin}–${last} 筆</span>
+          ${d.depth_capped ? `<span style="color:var(--warn)">OPS 最多只讓取前 ${
+              d.max_depth.toLocaleString()} 筆，其餘 ${(d.total-d.max_depth).toLocaleString()} 件無法翻到——請加條件收斂</span>` : ''}
+          <span>本次 ${(d.bytes/1024).toFixed(0)} KB</span>
+          <code>${esc(d.cql)}</code>
+        </div>
+        <div class="rctl">
+          ${Object.entries(FIELDS).filter(([k])=>['pa','in','ta'].includes(k)).map(([k,label])=>
+            `<button class="chip${k===d.field?' state':''}" data-field="${k}">${esc(label)}</button>`).join('')}
+          <span class="sep"></span>
+          <label><input type="checkbox" id="usonly" ${d.us_only?'checked':''}> 只看美國案（可點進來讀）</label>
+        </div>
+      </div>
+      <div class="rbody">
+        <div class="rlist">${rows}</div>
+        <aside class="rside">
+          <h3>申請人名稱變體</h3>
+          <p class="reason">同一家公司在專利庫裡有多種寫法（子公司、併購改名、大小寫），
+             只查一個名字<b>必定漏</b>。下列是<b>本頁 ${d.fetched} 筆</b>裡實際出現的名稱，不是全部；
+             點一個名稱可以把查詢收斂到那個確切寫法。</p>
+          ${variants || '<p class="reason">本頁沒有申請人資料。</p>'}
+        </aside>
+      </div>
+      <div class="rpage">
+        <button id="rprev" ${d.begin<=1?'disabled':''}>‹ 前 ${d.page_size}</button>
+        <span>${d.begin}–${last} / 可取 ${d.reachable.toLocaleString()}</span>
+        <button id="rnext" ${last>=d.reachable?'disabled':''}>後 ${d.page_size} ›</button>
+      </div>
+    </div>`;
+
+  $('#rprev').onclick = () => runSearch(d.query, {field:d.field, us:d.us_only,
+                                                 start:Math.max(1, d.begin - d.page_size)});
+  $('#rnext').onclick = () => runSearch(d.query, {field:d.field, us:d.us_only,
+                                                 start:d.begin + d.page_size});
+  $('#usonly').onchange = e => runSearch(d.query, {field:d.field, us:e.target.checked, start:1});
+  $('#stage').querySelectorAll('[data-field]').forEach(b => b.onclick =
+    () => runSearch(d.query, {field:b.dataset.field, us:d.us_only, start:1}));
+  $('#stage').querySelectorAll('[data-refine]').forEach(b => b.onclick =
+    () => runSearch(b.dataset.refine, {field:'pa', us:d.us_only, start:1}));
+  $('#stage').querySelectorAll('.rrow[data-number]').forEach(b => b.onclick = () => {
+    RETURN_TO = d;                       // kept in memory: going back costs no quota
+    $('#q').value = b.dataset.number;
+    go(false, {keepReturn:true});
+  });
+}
+
+async function runSearch(query, opts={}){
+  const {field='pa', us=true, start=1} = opts;
+  busyOn(query, 'fetch');
+  try{
+    const url = `/api/search?q=${encodeURIComponent(query)}&field=${field}` +
+                `&us_only=${us}&start=${start}&size=50`;
+    const d = await (await fetch(url)).json();
+    renderResults(d);
+    history.replaceState(null, '', `?q=${encodeURIComponent(query)}&field=${field}` +
+                                   `&us=${us?1:0}${start>1?'&start='+start:''}`);
+  }catch(e){ welcome('檢索失敗：' + e.message); }
+  finally{ busyOff(); }
+}
+
 /* ---------------- flow ---------------- */
 function welcome(msg){
   $('#docbar').style.display='none'; $('#pops').innerHTML=''; CARD=null;
   $('#stage').innerHTML = `<div class="center"><div class="box${msg?' err':''}">
-      <h2>${msg? '查不到' : '輸入一個美國專利號碼'}</h2>
+      <h2>${msg? '查不到' : '輸入專利號碼，或公司／發明人名字'}</h2>
       ${msg? `<p>${esc(msg)}</p>` : ''}
-      <p>下列格式都會解析到同一件（點一下即填入）：</p>
+      <p>不需要先選查哪一種，系統自己分辨（點一下即填入）：</p>
       <div class="fmt">
         <span>US20250383260A1</span><span>US 2025/0383260 A1</span><br>
         <span>US2025383260A1</span><span>6,285,999</span><span>5960411</span>
       </div>
-      <p style="margin-top:14px">申請號（18/123,456）目前不支援，會明確告知原因。</p>
+      <p style="margin-top:14px">名字會走 EPO OPS 的欄位檢索，回傳一份可以點進去讀的列表：</p>
+      <div class="fmt">
+        <span>Corning</span><span>Taiwan Semiconductor</span><span>in=Larry Page</span><span>ta=fiber array</span>
+      </div>
+      <p style="margin-top:14px">申請號（18/123,456）目前不支援，會明確告知原因。
+         檢索只做結構化欄位（申請人／發明人／標題摘要），不做語意概念檢索。</p>
     </div></div>`;
   $('#stage').querySelectorAll('.fmt span').forEach(s =>
     s.onclick = () => { $('#q').value = s.textContent; go(false); });
@@ -944,13 +1131,17 @@ function welcome(msg){
 
 function render(c){ CARD=c; renderDocBar(c); renderReader(c); enrich(c); }
 
-async function go(refresh){
+async function go(refresh, opts={}){
   const q=$('#q').value.trim(); if(!q) return;
+  if(!opts.keepReturn) RETURN_TO = null;
   busyOn(q, 'fetch');
   try{
-    const r = await fetch(`/api/patent?q=${encodeURIComponent(q)}${refresh?'&refresh=true':''}`);
+    const r = await fetch(`/api/query?q=${encodeURIComponent(q)}${refresh?'&refresh=true':''}`);
     const d = await r.json();
-    if(!r.ok || d.error){
+    if(d.kind === 'results'){                 // the server decided this was a name
+      renderResults(d);
+      history.replaceState(null, '', '?q=' + encodeURIComponent(q) + `&field=${d.field||'pa'}&us=${d.us_only?1:0}`);
+    } else if(!r.ok || d.error){
       welcome((d.error||('HTTP '+r.status)) + (d.tried&&d.tried.length?`（已嘗試：${d.tried.join('、')}）`:''));
     } else {
       const tab = new URLSearchParams(location.search).get('tab');
@@ -1030,8 +1221,19 @@ const saved = localStorage.getItem('pg.split');
 if(saved) document.documentElement.style.setProperty('--split', saved);
 wireRead();
 loadLib();
-const deep = new URLSearchParams(location.search).get('q');
-if(deep){ $('#q').value = deep; go(false); } else { welcome(); }
+const url = new URLSearchParams(location.search);
+const deep = url.get('q');
+if(deep){
+  $('#q').value = deep;
+  // A search deep link carries its own field / scope / page; a bare ?q= is
+  // classified by the server exactly as if it had been typed.
+  if(url.has('field') || url.has('start') || url.has('us')){
+    runSearch(deep, {field:url.get('field')||'pa', us:url.get('us') !== '0',
+                     start:parseInt(url.get('start')||'1',10)});
+  } else {
+    go(false);
+  }
+} else { welcome(); }
 </script>
 </body>
 </html>

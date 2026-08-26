@@ -32,6 +32,54 @@ OPS_LINK_RE = re.compile(
     r"^published-data/images/[A-Z]{2}/[0-9A-Za-z]+/[A-Z0-9]+/(thumbnail|fullimage|firstpage)$"
 )
 
+# Structured fields only (CIM §4 boundary 1): no free-text concept search.
+SEARCH_FIELDS = {
+    "pa": "申請人",
+    "in": "發明人",
+    "ta": "標題／摘要",
+    "ti": "標題",
+    "ab": "摘要",
+}
+FIELD_PREFIX_RE = re.compile(r"^(pa|in|ta|ti|ab)\s*=\s*", re.IGNORECASE)
+SEARCH_PAGE = 50          # ~5-8 KB per result measured; 50 keeps a page under 400 KB
+
+# Version of the OPS-built card, for the same reason google_patents.READING_SCHEMA
+# exists: a stored card must not keep whatever the extractor produced on the day
+# it was written. BUMP when card_from_ops or the OPS field extraction changes.
+#   1  first version
+#   2  abstract cleaned of paragraph numbers and <3 > subscript markup
+OPS_CARD_SCHEMA = 2
+
+
+def parse_query(text: str, field: str = "pa") -> tuple[str, str]:
+    """(field, term). An explicit `in=Larry Page` prefix wins over the default."""
+    term = (text or "").strip()
+    match = FIELD_PREFIX_RE.match(term)
+    if match:
+        field, term = match.group(1).lower(), term[match.end():].strip()
+    if field not in SEARCH_FIELDS:
+        field = "pa"
+    return field, term
+
+
+def build_cql(term: str, *, field: str = "pa", us_only: bool = True) -> str:
+    """Build the CQL query. The term is quoted, never concatenated raw.
+
+    Inside double quotes CQL treats AND / OR / NOT as literal text, so quoting
+    is what keeps a company name with "and" in it from becoming an operator —
+    and what stops a stray quote in the input from rewriting the query. OPS
+    documents no escape sequence, so an embedded quote is dropped rather than
+    passed through.
+    """
+    safe = " ".join((term or "").replace('"', " ").split())
+    cql = f'{field}="{safe}"'
+    if us_only:
+        # pn=US restricts to US publications. Verified 2026-08-26: a 50-row page
+        # of `pa="Corning" AND pn=US` came back 50/50 US. `cc=US` is not a valid
+        # index and `pn=US*` is refused (truncation needs 3 characters).
+        cql += " AND pn=US"
+    return cql
+
 DISPLAY_CAPS = {
     "backward_citations": 60,
     "forward_citations": 60,
@@ -191,6 +239,169 @@ class Service:
             cached.write_bytes(pdf)
         return pdf, included
 
+    # --------------------------------------------------------------- search
+
+    def search(self, text: str, *, field: str = "pa", us_only: bool = True,
+               start: int = 1, size: int = SEARCH_PAGE) -> dict:
+        """Structured-field search over EPO OPS (BR-1's second entry point).
+
+        Google Patents' search is excluded by its robots.txt (BR-7), so this can
+        only go to OPS. Everything the reader needs to distrust the result set
+        correctly is returned with it: the true total, how much of it is
+        reachable at all, and which applicant-name spellings actually appear.
+        """
+        field, term = parse_query(text, field)
+        if not term:
+            return {"kind": "results", "available": False, "query": "",
+                    "reason": "空的查詢。輸入公司名或發明人姓名，或直接輸入專利號碼。"}
+
+        client = self.ops_client()
+        if client is None:
+            return {"kind": "results", "available": False, "query": term,
+                    "reason": self._ops_reason or "EPO OPS 不可用。"}
+
+        cql = build_cql(term, field=field, us_only=us_only)
+        start = max(1, min(int(start or 1), ops.SEARCH_MAX_DEPTH))
+        size = max(1, min(int(size or SEARCH_PAGE), ops.SEARCH_MAX_SPAN))
+        end = min(start + size - 1, ops.SEARCH_MAX_DEPTH)
+
+        spent = client.usage.bytes_served
+        try:
+            found = client.search_biblio(cql, start=start, end=end)
+        except ops.OpsError as exc:
+            # "No results" is an answer, not a failure: OPS says it with a 404.
+            if exc.status == 404 and "EntityNotFound" in (exc.body or ""):
+                return {"kind": "results", "available": True, "query": term, "field": field,
+                        "us_only": us_only, "cql": cql, "total": 0, "fetched": 0,
+                        "results": [], "applicant_variants": [],
+                        "reason": f"OPS 沒有符合 {SEARCH_FIELDS[field]}「{term}」的公開文件。",
+                        "quota": client.usage.summary()}
+            self.store.log_lookup(term, None, False, f"search failed: {_fault(exc)}")
+            return {"kind": "results", "available": False, "query": term,
+                    "reason": f"EPO OPS 檢索失敗（{_fault(exc)}）。"}
+
+        # A row is only clickable if our card path can actually resolve it: the
+        # search is worldwide-capable but the reader is US-only (Stage 1).
+        for row in found["results"]:
+            row["openable"] = self._openable(row)
+
+        found.update({
+            "kind": "results",
+            "available": True,
+            "query": term,
+            "field": field,
+            "field_label": SEARCH_FIELDS[field],
+            "us_only": us_only,
+            "cql": cql,
+            "page_size": size,
+            "reachable": min(found["total"], ops.SEARCH_MAX_DEPTH),
+            "depth_capped": found["total"] > ops.SEARCH_MAX_DEPTH,
+            "max_depth": ops.SEARCH_MAX_DEPTH,
+            "bytes": client.usage.bytes_served - spent,
+            "quota": client.usage.summary(),
+        })
+        self.store.log_lookup(term, None, True,
+                              f"search {cql} -> {found['total']} hits, page {start}-{end}")
+        return found
+
+    def card_from_ops(self, query: str) -> dict | None:
+        """A card built from OPS for a document Google Patents does not carry.
+
+        Measured 2026-08-26: Google Patents had NONE of 24 US publications from
+        2026-06 to 2026-08, while OPS search returns them newest-first — so the
+        first page of a company search is exactly the part the Google-only card
+        path cannot open. Failing there would make the search look broken while
+        the document is sitting in OPS. What OPS cannot supply for a US case is
+        the full text (established fact F-1), and that absence is stated rather
+        than left blank (BR-3).
+        """
+        client = self.ops_client()
+        if client is None:
+            return None
+        try:
+            parsed = numbers.normalize(query)
+            fmt, resolved = client.resolve(parsed)
+            row = ops.parse_biblio(client.biblio(resolved, fmt=fmt))
+        except (numbers.NumberError, ops.OpsError):
+            return None
+        if not row:
+            return None
+
+        absent = (
+            "Google Patents 尚未收錄此件（最新公開案常見，實測 2026 年 6–8 月的公開案"
+            "一件都還沒有），而 OPS 的全文不涵蓋美國案，所以現在沒有可複製的全文。"
+            "原文件掃描與圖式可以看。"
+        )
+        empty = {"items": [], "total": 0, "truncated": False, "cap": None}
+        card = {
+            "query": query,
+            "canonical": parsed.canonical,
+            "espacenet": parsed.espacenet,
+            "kind_of_document": parsed.kind_of_document,
+            "number": row["number"] or parsed.canonical,
+            "url": None,
+            "title": row["title"],
+            "abstract": row["abstract"],
+            "description": None,
+            "description_blocks": [],
+            "claims_text": None,
+            "claims": [],
+            "independent_claims": [],
+            "images": [],
+            "images_declared": 0,
+            "pdf_link": None,
+            "classifications": {"items": row["classifications"], "total": len(row["classifications"]),
+                                "truncated": False, "cap": None},
+            "family": dict(empty), "similar_documents": dict(empty),
+            "backward_citations": dict(empty), "forward_citations": dict(empty),
+            "legal_events": dict(empty),
+            "legal_status": None,
+            "publication_date": row["date"],
+            "filing_date": None,
+            "priority_date": None,
+            "assignee": row["applicants"],
+            "inventors": row["inventors"],
+            "provenance": {key: {"source": "EPO OPS", "selector": f"{fmt}/{resolved} biblio",
+                                 "present": True}
+                           for key in ("title", "abstract", "classifications",
+                                       "assignee", "inventors", "publication_date")},
+            "missing": [{"field": field, "reason": absent}
+                        for field in ("description", "claims", "images", "pdf_link")],
+            "links": {
+                "google": f"https://patents.google.com/patent/{row['number']}/en",
+                "espacenet": f"https://worldwide.espacenet.com/patent/search?q=pn%3D{row['number']}",
+                "patentscope": f"https://patentscope.wipo.int/search/en/result.jsf?query={row['number']}",
+            },
+            "ops": None,
+            "_reading_schema": gp.READING_SCHEMA,
+            "_ops_card_schema": OPS_CARD_SCHEMA,
+            "_ops_only": True,
+            "_ops_only_reason": absent,
+            "_from_store": False,
+        }
+        self.store.put(card["number"], card["title"], "epo_ops", card)
+        self.store.log_lookup(query, card["number"], True, "card from OPS (no Google record)")
+        return card
+
+    @staticmethod
+    def _openable(row: dict) -> bool:
+        try:
+            return numbers.normalize(row.get("number") or "").supported
+        except numbers.NumberError:
+            return False
+
+    def classify(self, text: str) -> str:
+        """'number' or 'query' — the user never has to say which (BR-1)."""
+        term = (text or "").strip()
+        if not term:
+            return "query"
+        if FIELD_PREFIX_RE.match(term):
+            return "query"
+        try:
+            return "number" if numbers.normalize(term).supported else "query"
+        except numbers.NumberError:
+            return "query"
+
     def ops_inpadoc(self, number: str) -> dict:
         """INPADOC family and legal events — the reading Google Patents cannot give.
 
@@ -228,10 +439,17 @@ class Service:
             self.store.log_lookup(query, None, False, parsed.note)
             raise ResolveError(parsed.note or "此輸入型態目前不支援")
 
-        # An exact match in the library short-circuits the network entirely.
+        # An exact match in the library short-circuits the network entirely —
+        # unless it is an OPS-only card, which is provisional by construction:
+        # Google Patents indexes newer publications eventually, and when it does
+        # the reader should get the full text instead of the stub forever.
+        provisional = None
         if not refresh:
             for candidate in parsed.candidates:
                 hit = self.store.get(candidate)
+                if hit and hit.get("_ops_only"):
+                    provisional = hit
+                    break
                 if hit:
                     self.store.log_lookup(query, candidate, True, "from store")
                     return self._upgrade(candidate, hit)
@@ -249,6 +467,13 @@ class Service:
             self.store.log_lookup(query, candidate, True, "fetched")
             return card
 
+        if provisional:                       # Google still does not have it
+            if provisional.get("_ops_card_schema") != OPS_CARD_SCHEMA:
+                rebuilt = self.card_from_ops(query)   # the extractor has moved on
+                if rebuilt:
+                    return rebuilt
+            self.store.log_lookup(query, provisional.get("number"), True, "OPS-only card from store")
+            return provisional
         self.store.log_lookup(query, None, False, last_error or "all candidates failed")
         raise ResolveError(
             f"找不到這件專利。已嘗試 {len(tried)} 種 kind code 組合都沒有結果——"

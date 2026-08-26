@@ -34,6 +34,15 @@ TOKEN_PATH = "/auth/accesstoken"
 REST = "/rest-services"
 REFRESH_MARGIN_S = 60
 
+# Search limits, measured against the live API on 2026-08-26 (S-6). Neither is
+# stated plainly in the public documentation and both are hard boundaries:
+#   Range span  > 100  -> HTTP 400 CLIENT.InvalidQuery
+#   Range end   > 2000 -> HTTP 400 CLIENT.InvalidQuery
+# So a query with 38,955 hits can only ever be paged through its first 2,000.
+# That is a property of the source, not of this tool, and must be shown as such.
+SEARCH_MAX_SPAN = 100
+SEARCH_MAX_DEPTH = 2000
+
 # OPS bills and throttles per service, and reports the current per-minute
 # allowance for each in x-throttling-control. Mapping a path to its service is
 # what makes those numbers actionable instead of decorative.
@@ -220,6 +229,166 @@ def merge_pdf_pages(pages: list[bytes]) -> bytes:
     return out.getvalue()
 
 
+def _as_list(node) -> list:
+    if node is None:
+        return []
+    return node if isinstance(node, list) else [node]
+
+
+def _text(node) -> str | None:
+    """The '$' text of an OPS node, whatever wrapper it arrives in."""
+    if isinstance(node, dict):
+        value = node.get("$")
+        return value.strip() if isinstance(value, str) else None
+    return node.strip() if isinstance(node, str) else None
+
+
+def _party_names(parties: dict, role: str) -> tuple[list[str], list[str]]:
+    """(as-filed names, normalised names) for applicants or inventors.
+
+    OPS returns each party TWICE: once `@data-format="original"` (the string as
+    it was filed — "Taiwan Semiconductor Manufacturing Company, Ltd.") and once
+    `"epodoc"` (EPO's normalised form — "TAIWAN SEMICONDUCTOR MFG [TW]"). Both
+    are needed: the normalised form groups a company's filings, the as-filed
+    form is what the reader recognises and what an exact re-query must use.
+    """
+    original, normalised = [], []
+    for party in _as_list((parties or {}).get(role, {}).get(role.rstrip("s"))):
+        name = _text((party.get(f"{role.rstrip('s')}-name") or {}).get("name"))
+        if not name:
+            continue
+        (normalised if party.get("@data-format") == "epodoc" else original).append(name)
+    return list(dict.fromkeys(original)), list(dict.fromkeys(normalised))
+
+
+def _abstract_text(doc: dict) -> str | None:
+    """The English abstract if the document carries one, else the first present."""
+    best = None
+    for abstract in _as_list(doc.get("abstract")):
+        if not isinstance(abstract, dict):
+            continue
+        text = " ".join(t for t in (_text(p) for p in _as_list(abstract.get("p"))) if t)
+        # Two pieces of markup leak into OPS abstract prose: the paragraph number
+        # ("[0000] A loopback test system…") and subscripts written as angle
+        # brackets ("NaNO<3 >and KNO<3 >"). Both are noise in a reading surface.
+        text = re.sub(r"^\[\d{4}\]\s*", "", text)
+        # The whitespace inside the brackets is usually the word break
+        # ("NaNO<3 >and"), so it is kept — dropping it welds the next word on.
+        # Before punctuation it is clearly not a word break, so it goes.
+        text = re.sub(r"<\s*(\d+)\s*>(?=[.,;:)\]])", r"\1", text)
+        text = re.sub(r"<\s*(\d+)(\s*)>", r"\1\2", text)
+        text = " ".join(text.split()).strip()
+        if not text:
+            continue
+        if abstract.get("@lang") == "en":
+            return text
+        best = best or text
+    return best
+
+
+def exchange_row(doc: dict) -> dict:
+    """One `exchange-document` as a flat row.
+
+    The same document shape comes back from search/biblio and from
+    publication/{fmt}/{num}/biblio, so one extractor serves both: a search hit
+    and a single-document lookup are the same thing seen from two directions.
+    """
+    biblio = doc.get("bibliographic-data") or {}
+    date = None
+    for ident in _as_list((biblio.get("publication-reference") or {}).get("document-id")):
+        if ident.get("@document-id-type") == "docdb":
+            date = _text(ident.get("date")) or date
+    titles = {t.get("@lang"): _text(t) for t in _as_list(biblio.get("invention-title"))
+              if isinstance(t, dict)}
+    applicants, applicants_norm = _party_names(biblio.get("parties") or {}, "applicants")
+    inventors, _ = _party_names(biblio.get("parties") or {}, "inventors")
+
+    classifications = []
+    for entry in _as_list((biblio.get("patent-classifications") or {}).get("patent-classification")):
+        parts = [_text(entry.get(k)) for k in
+                 ("section", "class", "subclass", "main-group", "group", "subgroup")]
+        section, cls, subclass, main_group, group, subgroup = parts
+        code = f"{section or ''}{cls or ''}{subclass or ''}"
+        tail = main_group or group
+        if tail:
+            code += f"{tail}/{subgroup or ''}".rstrip("/")
+        scheme = _text((entry.get("classification-scheme") or {}).get("@scheme")) \
+            or (entry.get("classification-scheme") or {}).get("@scheme")
+        if code:
+            classifications.append({"code": code, "description": scheme})
+    for entry in _as_list((biblio.get("classifications-ipcr") or {}).get("classification-ipcr")):
+        text = _text(entry.get("text"))
+        if text:
+            classifications.append({"code": " ".join(text.split()[:1]), "description": "IPCR"})
+
+    country, number, kind = doc.get("@country"), doc.get("@doc-number"), doc.get("@kind")
+    return {
+        "number": f"{country or ''}{number or ''}{kind or ''}",
+        "country": country, "kind": kind, "date": date,
+        "title": titles.get("en") or next(iter(titles.values()), None),
+        "applicants": applicants, "applicants_norm": applicants_norm,
+        "inventors": inventors[:6],
+        "abstract": _abstract_text(doc),
+        "classifications": list({c["code"]: c for c in classifications}.values()),
+        "family_id": doc.get("@family-id"),
+    }
+
+
+def parse_biblio(payload: dict) -> dict | None:
+    """One publication's bibliographic data, as the same row shape as a search hit."""
+    root = (payload or {}).get("ops:world-patent-data", {})
+    for entry in _as_list(root.get("exchange-documents")):
+        for doc in _as_list(entry.get("exchange-document")):
+            return exchange_row(doc)
+    return None
+
+
+def parse_search(payload: dict) -> dict:
+    """Turn a published-data/search/biblio response into rows plus name variants.
+
+    Kept as a module function, not a method, so it can be exercised offline
+    against a saved payload without spending a search call.
+    """
+    root = (payload or {}).get("ops:world-patent-data", {}).get("ops:biblio-search", {})
+    total = int(root.get("@total-result-count") or 0)
+    rng = root.get("ops:range") or {}
+    documents = []
+    for entry in _as_list((root.get("ops:search-result") or {}).get("exchange-documents")):
+        documents.extend(_as_list(entry.get("exchange-document")))
+
+    rows, variants = [], {}
+    for doc in documents:
+        row = exchange_row(doc)
+        rows.append(row)
+        applicants, applicants_norm = row["applicants"], row["applicants_norm"]
+
+        # BR-8: group by the normalised name, keep every as-filed spelling under
+        # it. One company is many strings, and hiding that turns a property of
+        # the data into an apparent defect of the tool. The two lists are in
+        # @sequence order, so they pair up when the document lists both forms.
+        keys = applicants_norm or applicants
+        paired = len(applicants) == len(keys)
+        for index, norm in enumerate(keys):
+            slot = variants.setdefault(norm, {"name": norm, "count": 0, "originals": {}})
+            slot["count"] += 1
+            filed_names = [applicants[index]] if paired else applicants
+            for filed in filed_names:
+                slot["originals"][filed] = slot["originals"].get(filed, 0) + 1
+
+    ordered = sorted(variants.values(), key=lambda v: -v["count"])
+    for slot in ordered:
+        slot["originals"] = [{"name": n, "count": c}
+                             for n, c in sorted(slot["originals"].items(), key=lambda kv: -kv[1])]
+    return {
+        "total": total,
+        "fetched": len(rows),
+        "begin": int(rng.get("@begin") or 0),
+        "end": int(rng.get("@end") or 0),
+        "results": rows,
+        "applicant_variants": ordered,
+    }
+
+
 @dataclass
 class ImageInstance:
     """One retrievable rendition of a document, as images-inquiry describes it."""
@@ -253,12 +422,16 @@ class OpsClient:
     def token(self) -> str:
         if self._token and time.time() < self._expires_at - REFRESH_MARGIN_S:
             return self._token
-        r = self._client.post(
-            self.cfg.base_url + TOKEN_PATH,
-            headers={"Authorization": f"Basic {self._basic()}",
-                     "Content-Type": "application/x-www-form-urlencoded"},
-            data={"grant_type": "client_credentials"},
-        )
+        try:
+            r = self._client.post(
+                self.cfg.base_url + TOKEN_PATH,
+                headers={"Authorization": f"Basic {self._basic()}",
+                         "Content-Type": "application/x-www-form-urlencoded"},
+                data={"grant_type": "client_credentials"},
+            )
+        except httpx.HTTPError as exc:
+            raise OpsError(f"連不上 EPO OPS 的認證端點（{type(exc).__name__}）。",
+                           None, str(exc)[:200]) from exc
         if r.status_code in (400, 401, 403):
             raise OpsAuthError(
                 "OPS 拒絕這組金鑰。請確認 .env 裡的 OPS_CONSUMER_KEY / "
@@ -299,11 +472,20 @@ class OpsClient:
         """GET a rest-services path. `raw` returns the httpx.Response (binary)."""
         url = self.cfg.base_url + REST + ("" if path.startswith("/") else "/") + path
         self._throttle(service_of(path))
-        r = self._client.get(
-            url,
-            headers={"Authorization": f"Bearer {self.token()}", "Accept": accept},
-            params=params,
-        )
+        try:
+            r = self._client.get(
+                url,
+                headers={"Authorization": f"Bearer {self.token()}", "Accept": accept},
+                params=params,
+            )
+        except httpx.HTTPError as exc:
+            # A timeout or a dropped connection is an OPS failure like any other:
+            # it has to arrive as one, or it escapes as a 500 with a stack trace
+            # instead of a sentence the reader can act on.
+            raise OpsError(
+                f"連不上 EPO OPS（{type(exc).__name__}）。可能是網路問題或 OPS 正忙，"
+                f"稍後再試一次即可。", None, str(exc)[:200],
+            ) from exc
         self.usage.record(len(r.content))
         self.usage.absorb_headers(r.headers)
 
@@ -494,6 +676,20 @@ class OpsClient:
         return self.get("published-data/search",
                         params={"q": cql, "Range": f"{start}-{end}"})
 
+    def search_biblio(self, cql: str, *, start: int = 1, end: int = 50) -> dict:
+        """CQL search returning full bibliographic data, parsed into rows.
+
+        The `biblio` constituent is what makes BR-8 possible at all: the plain
+        search returns document ids only, while this carries the applicant NAME
+        strings — both as filed and as normalised — which is the material the
+        reader needs in order to see that one company is many spellings.
+        Costs about 5-8 KB per result (measured), so the page size is a quota
+        decision, not a display preference.
+        """
+        end = min(end, start + SEARCH_MAX_SPAN - 1, SEARCH_MAX_DEPTH)
+        return parse_search(self.get("published-data/search/biblio",
+                                     params={"q": cql, "Range": f"{start}-{end}"}))
+
     def resolve(self, parsed) -> tuple[str, str]:
         """Find an input format OPS actually accepts for this number.
 
@@ -511,16 +707,21 @@ class OpsClient:
             except OpsError as exc:
                 if exc.status != 404:
                     raise
-        try:
-            self.biblio(parsed.epodoc, fmt="epodoc")
-            return ("epodoc", parsed.epodoc)
-        except OpsError as exc:
-            if exc.status != 404:
-                raise
+        for candidate in parsed.epodoc_candidates():
+            try:
+                self.biblio(candidate, fmt="epodoc")
+                return ("epodoc", candidate)
+            except OpsError as exc:
+                if exc.status != 404:
+                    raise
         # Last resort: let OPS translate the display form it does accept here.
+        # Only the OUTPUT half of the conversion is read: walking the whole
+        # response concatenates the echoed input with the answer and produces a
+        # number that exists nowhere (observed: US.US2026189299A12026189299A1.A1).
         conv = self.number_convert(parsed.espacenet, from_fmt="epodoc", to_fmt="docdb")
-        body = "".join(str(v) for v in _walk(conv, "doc-number"))
-        kind = "".join(str(v) for v in _walk(conv, "kind"))
+        output = (_walk(conv, "output") or [conv])[0]
+        body = next((str(v) for v in _walk(output, "doc-number") if v), "")
+        kind = next((str(v) for v in _walk(output, "kind") if v), "")
         if body:
             num = f"{parsed.country}.{body}.{kind or parsed.kind_code or 'A1'}"
             self.biblio(num, fmt="docdb")

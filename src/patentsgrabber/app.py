@@ -47,6 +47,40 @@ def api_patent(q: str, refresh: bool = False):
         )
 
 
+@app.get("/api/query")
+def api_query(q: str, refresh: bool = False, field: str = "pa",
+              us_only: bool = True, start: int = 1, size: int = 50):
+    """The single front door: a number gives a card, anything else gives a list.
+
+    BR-1 says the reader never has to declare which kind of thing they typed, so
+    the classification lives here rather than in the page.
+    """
+    text = (q or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="空的查詢")
+    if service.classify(text) == "number":
+        try:
+            card = service.lookup(text, refresh=refresh)
+            return {"kind": "card", **card}
+        except ResolveError as exc:
+            # Google not having it is not the same as the document not existing:
+            # OPS carries recent publications months before Google indexes them.
+            fallback = service.card_from_ops(text)
+            if fallback:
+                return {"kind": "card", **fallback}
+            return JSONResponse(status_code=404,
+                                content={"kind": "card", "error": str(exc),
+                                         "tried": getattr(exc, "tried", [])})
+    return service.search(text, field=field, us_only=us_only, start=start, size=size)
+
+
+@app.get("/api/search")
+def api_search(q: str, field: str = "pa", us_only: bool = True,
+               start: int = 1, size: int = 50):
+    """Search explicitly, e.g. when refining to one applicant-name spelling."""
+    return service.search(q.strip(), field=field, us_only=us_only, start=start, size=size)
+
+
 @app.get("/api/library")
 def api_library():
     return {"count": service.store.count(), "recent": service.store.recent(40)}
