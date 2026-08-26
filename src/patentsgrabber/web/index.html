@@ -10,7 +10,15 @@
     --accent:#2f5d50; --accent-soft:#e6efeb; --warn:#8a5a1a; --warn-soft:#fdf3e3;
     --figbg:#ffffff;
     --mono:ui-monospace,"Cascadia Mono",Consolas,monospace;
+    --sans:"Noto Sans TC",-apple-system,"Segoe UI",system-ui,sans-serif;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Noto Serif TC",serif;
     --split:55;              /* text pane percentage; persisted */
+
+    /* Reading controls — every one of these is user-set and persisted.
+       Defaults are chosen for long-form reading, not for filling the window:
+       a patent specification is 20-400K characters of dense prose. */
+    --fs:16px; --lh:1.8; --measure:68ch; --gap:1em; --gutter:3.6em;
+    --prose:var(--serif); --numshow:inline; --numeral:inherit;
   }
   @media (prefers-color-scheme:dark){
     :root{ --bg:#141519; --panel:#1c1d21; --ink:#e8e8e4; --muted:#9a9a94; --line:#2f3036;
@@ -20,7 +28,7 @@
   *{box-sizing:border-box}
   html,body{height:100%}
   body{margin:0;background:var(--bg);color:var(--ink);overflow:hidden;
-       font:15px/1.65 "Noto Sans TC",-apple-system,"Segoe UI",system-ui,sans-serif;
+       font:15px/1.65 var(--sans);
        display:flex;flex-direction:column;height:100dvh}
 
   /* ---------- zone 1: search ---------- */
@@ -44,7 +52,7 @@
   .titleline h1.open{-webkit-line-clamp:5}
   .chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
   .chip{font-size:12px;padding:3.5px 10px;border-radius:20px;border:1px solid var(--line);
-        background:transparent;color:var(--muted);font-family:inherit;cursor:default;
+        background:transparent;color:var(--muted);font-family:var(--sans);cursor:default;
         display:inline-flex;align-items:center;gap:5px;line-height:1.4}
   .chip b{color:var(--ink);font-weight:600;font-family:var(--mono);font-size:11.5px}
   .chip.id{font-family:var(--mono);background:var(--accent-soft);color:var(--accent);border-color:transparent}
@@ -53,27 +61,66 @@
   button.chip:hover{border-color:var(--accent);color:var(--ink)}
   button.chip[aria-expanded=true]{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
   .chip.warn{background:var(--warn-soft);color:var(--warn);border-color:transparent}
+  .chip.epo{background:var(--accent-soft);color:var(--accent);border-color:transparent}
   .chip.zero{opacity:.45}
   .sep{width:1px;height:18px;background:var(--line);margin:0 3px}
 
-  /* ---------- zone 3: reading area (everything else is a popover) ---------- */
+  /* ---------- zone 3: reading area ---------- */
   .reader{flex:1 1 auto;display:flex;min-height:0}
   .pane{display:flex;flex-direction:column;min-width:0;min-height:0}
   .pane.text{flex:0 0 calc(var(--split) * 1%)}
   .pane.figs{flex:1 1 auto;border-left:1px solid var(--line)}
-  .tabs{display:flex;gap:2px;padding:8px 12px 0;flex:0 0 auto}
+  .tabs{display:flex;gap:2px;padding:8px 12px 0;flex:0 0 auto;align-items:center}
   .tabs button{background:transparent;color:var(--muted);border:none;border-bottom:2px solid transparent;
                border-radius:6px 6px 0 0;padding:7px 13px;font-size:13.5px}
   .tabs button.on{color:var(--ink);border-bottom-color:var(--accent);font-weight:600}
   .tabs .spacer{flex:1}
-  .tabs .note{color:var(--muted);font-size:11.5px;align-self:center;padding-right:4px;font-family:var(--mono)}
-  .body{flex:1 1 auto;overflow:auto;padding:6px 20px 28px;min-height:0}
-  .prose{white-space:pre-wrap;max-width:78ch}
-  .claim{padding:11px 13px;border:1px solid var(--line);border-radius:9px;margin-bottom:9px;max-width:78ch}
+  .tabs .note{color:var(--muted);font-size:11.5px;padding-right:6px;font-family:var(--mono)}
+  .tabs .tool{font-size:12px;padding:4px 10px;border:1px solid var(--line);border-radius:20px;color:var(--muted)}
+  .tabs .tool:hover{border-color:var(--accent);color:var(--ink)}
+  .prog{flex:0 0 2px;background:var(--line)}
+  .prog i{display:block;height:2px;width:var(--p,0%);background:var(--accent);transition:width .08s linear}
+  .body{flex:1 1 auto;overflow:auto;padding:14px 20px 40vh;min-height:0;scroll-behavior:smooth}
+
+  /* ---------- the reading surface itself ---------- */
+  .doc{max-width:var(--measure);margin-left:var(--gutter);
+       font-family:var(--prose);font-size:var(--fs);line-height:var(--lh)}
+  .doc h3.sec{font-family:var(--sans);font-size:12px;font-weight:700;letter-spacing:.09em;
+              text-transform:uppercase;color:var(--accent);margin:2.4em 0 .95em;
+              padding-bottom:.45em;border-bottom:1px solid var(--line);scroll-margin-top:8px}
+  .doc h3.sec:first-child{margin-top:.4em}
+  .doc .para{position:relative;margin:0 0 var(--gap)}
+  /* The [0042] number hangs in the margin: present for citation, out of the way
+     of the sentence. Inline numbers are what makes patent text read like code. */
+  .doc .pnum{display:var(--numshow);position:absolute;left:calc(-1 * var(--gutter));
+             top:.42em;width:calc(var(--gutter) - .8em);text-align:right;
+             font:11px/1 var(--mono);color:var(--muted);user-select:none}
+  .doc .bullet{position:relative;margin:0 0 calc(var(--gap) * .55);padding-left:1.15em}
+  .doc .bullet::before{content:"·";position:absolute;left:.3em;color:var(--muted);font-weight:700}
+  .doc .bullet.l2{margin-left:1.5em}
+  .doc .bullet.l3{margin-left:3em}
+  .doc pre.pre{font:12.5px/1.55 var(--mono);background:var(--bg);border:1px solid var(--line);
+               border-radius:8px;padding:10px 12px;overflow-x:auto;white-space:pre;max-width:100%}
+  .doc.flat{white-space:pre-wrap}
+  a.figref,a.claimref{color:var(--accent);text-decoration:none;
+                      border-bottom:1px dashed currentColor;cursor:pointer}
+  a.figref:hover,a.claimref:hover{background:var(--accent-soft)}
+  .numeral{color:var(--numeral)}
+
+  /* claims as a tree, because a claim IS a tree */
+  .claim{padding:12px 14px;border:1px solid var(--line);border-radius:9px;margin-bottom:11px;
+         max-width:var(--measure);font-family:var(--prose);font-size:var(--fs);line-height:var(--lh)}
   .claim.indep{border-color:var(--accent);background:var(--accent-soft)}
-  .claim .tag{font-size:11px;font-family:var(--mono);color:var(--accent);font-weight:700;margin-bottom:3px}
-  .claim.dep{opacity:.9}
-  details.deps summary{cursor:pointer;color:var(--muted);font-size:13px;margin:12px 0 10px}
+  .claim.dep{opacity:.94}
+  .claim .tag{font:700 11px/1.4 var(--mono);color:var(--accent);margin-bottom:5px;
+              letter-spacing:.04em;display:flex;gap:8px;align-items:baseline}
+  .claim .tag .ref{font-weight:400;color:var(--muted)}
+  .claim .part{margin:.45em 0 .45em 0;padding-left:.85em;border-left:2px solid var(--line)}
+  .claim .part.d2{margin-left:1.5em}
+  .claim .part.d3{margin-left:3em}
+  .claim.flash{outline:2px solid var(--accent);outline-offset:2px}
+  details.deps summary{cursor:pointer;color:var(--muted);font-size:13px;margin:12px 0 10px;
+                       font-family:var(--sans)}
 
   /* splitter */
   .split{flex:0 0 7px;cursor:col-resize;background:transparent;position:relative}
@@ -85,7 +132,16 @@
           background:var(--figbg);overflow:auto;min-height:0;position:relative}
   .figtop img{max-width:100%;max-height:100%;display:block;cursor:zoom-in}
   .figtop img.zoom{max-width:none;max-height:none;width:210%;cursor:zoom-out}
-  .figempty{color:var(--muted);font-size:13px;padding:26px;text-align:center;max-width:44ch;line-height:1.8}
+  .figsrc{position:absolute;top:8px;right:10px;font:11px/1.5 var(--mono);color:var(--muted);
+          background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:2px 9px;
+          opacity:.92;display:flex;gap:7px;align-items:center}
+  .figsrc button{padding:1px 7px;font-size:11px;background:transparent;color:var(--accent);
+                 border:1px solid var(--line);border-radius:12px}
+  .fighint{position:absolute;bottom:8px;left:50%;translate:-50% 0;font:11px/1.5 var(--sans);
+           color:var(--warn);background:var(--warn-soft);border-radius:20px;padding:3px 11px}
+  .figwait{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+           color:var(--muted);font:12px var(--mono);background:var(--figbg)}
+  .figempty{color:var(--muted);font-size:13px;padding:26px;text-align:center;max-width:46ch;line-height:1.85}
   .figbar{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:6px 10px;
           border-top:1px solid var(--line);background:var(--panel)}
   .figbar .n{font-family:var(--mono);font-size:12px;color:var(--muted);white-space:nowrap}
@@ -94,8 +150,14 @@
   .thumbs img{height:52px;border:2px solid transparent;border-radius:4px;background:#fff;
               cursor:pointer;flex:0 0 auto}
   .thumbs img.on{border-color:var(--accent)}
+  /* EPO pages are fetched one at a time against a quota, so the strip is numbers,
+     not thumbnails: showing 25 thumbnails would silently download 25 pages. */
+  .pages{display:flex;gap:4px;overflow-x:auto;flex:1;padding:2px 0}
+  .pages button{flex:0 0 auto;padding:3px 9px;font:11.5px var(--mono);background:transparent;
+                color:var(--muted);border:1px solid var(--line);border-radius:6px}
+  .pages button.on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
 
-  /* ---------- popovers: the home of all secondary information ---------- */
+  /* ---------- popovers ---------- */
   [popover]{margin:0;padding:0;border:1px solid var(--line);border-radius:11px;
             background:var(--panel);color:var(--ink);
             width:max-content;max-width:min(660px,92vw);max-height:min(66dvh,620px);overflow:auto;
@@ -124,6 +186,17 @@
   .ok{color:var(--accent)}
   a{color:var(--accent)}
   .poplinks{display:flex;flex-direction:column;gap:9px;font-size:14px}
+  .outline{display:flex;flex-direction:column;gap:2px;min-width:240px}
+  .outline button{text-align:left;background:transparent;color:var(--ink);border:none;
+                  padding:6px 9px;border-radius:7px;font-size:13px}
+  .outline button:hover{background:var(--accent-soft);color:var(--accent)}
+  .ctrl{display:grid;grid-template-columns:auto 1fr auto;gap:9px 12px;align-items:center;
+        font-size:13px;min-width:290px}
+  .ctrl label{color:var(--muted);white-space:nowrap}
+  .ctrl output{font-family:var(--mono);font-size:12px;color:var(--muted);min-width:3.4em;text-align:right}
+  .ctrl input[type=range]{width:100%;accent-color:var(--accent)}
+  .ctrl .row{grid-column:1/-1;display:flex;gap:14px;flex-wrap:wrap;color:var(--muted)}
+  .ctrl .row label{display:inline-flex;gap:5px;align-items:center;cursor:pointer;color:var(--ink)}
 
   /* welcome / error */
   .center{flex:1 1 auto;display:flex;align-items:center;justify-content:center;padding:30px}
@@ -141,7 +214,7 @@
 <body>
 
 <div class="searchbar">
-  <div class="brand">PatentsGrabber<small>Stage 0 · US · Google Patents</small></div>
+  <div class="brand">PatentsGrabber<small>Stage 1 · US · Google Patents + EPO OPS</small></div>
   <input id="q" type="text" placeholder="US20250383260A1 · US 2025/0383260 A1 · 6,285,999" autofocus>
   <button id="go">查詢</button>
   <button id="refresh" class="ghost" title="略過本地庫，重新抓取">重抓</button>
@@ -157,10 +230,69 @@
   <div class="pop-b" id="libbody"></div>
 </div>
 
+<div id="pop-read" popover>
+  <div class="pop-h">閱讀設定（會記住）</div>
+  <div class="pop-b">
+    <div class="ctrl">
+      <label for="c-fs">字級</label><input id="c-fs" type="range" min="13" max="22" step="1"><output id="o-fs"></output>
+      <label for="c-lh">行距</label><input id="c-lh" type="range" min="1.4" max="2.3" step="0.05"><output id="o-lh"></output>
+      <label for="c-me">行寬</label><input id="c-me" type="range" min="46" max="100" step="2"><output id="o-me"></output>
+      <label for="c-gp">段距</label><input id="c-gp" type="range" min="0.4" max="2.2" step="0.1"><output id="o-gp"></output>
+      <div class="row">
+        <label><input id="c-num" type="checkbox"> 段落編號</label>
+        <label><input id="c-serif" type="checkbox"> 襯線字體</label>
+        <label><input id="c-numeral" type="checkbox"> 元件編號高亮</label>
+        <button class="chip" id="c-reset">回到預設</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="pop-outline" popover>
+  <div class="pop-h">說明書章節</div>
+  <div class="pop-b"><div class="outline" id="outlinebody"></div></div>
+</div>
+
 <script>
 const $  = s => document.querySelector(s);
 const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-let CARD = null, figIndex = 0;
+let CARD = null, TABKEY = 'abstract';
+// One figure model for both sources: Google's direct PNGs and EPO's page service.
+let FIGS = {mode:'none', urls:[], link:'', pages:0, i:0, google:[], ops:null};
+
+/* ---------------- reading preferences ---------------- */
+const READ_DEFAULTS = {fs:16, lh:1.8, measure:68, gap:1.0, numbers:true, serif:true, numerals:false};
+let READ = {...READ_DEFAULTS};
+
+function applyRead(save){
+  const r = document.documentElement.style;
+  r.setProperty('--fs', READ.fs + 'px');
+  r.setProperty('--lh', READ.lh);
+  r.setProperty('--measure', READ.measure + 'ch');
+  r.setProperty('--gap', READ.gap + 'em');
+  r.setProperty('--prose', READ.serif ? 'var(--serif)' : 'var(--sans)');
+  r.setProperty('--numshow', READ.numbers ? 'inline' : 'none');
+  r.setProperty('--gutter', READ.numbers ? '3.6em' : '0em');
+  r.setProperty('--numeral', READ.numerals ? 'var(--warn)' : 'inherit');
+  $('#c-fs').value = READ.fs;        $('#o-fs').textContent = READ.fs + 'px';
+  $('#c-lh').value = READ.lh;        $('#o-lh').textContent = READ.lh.toFixed(2);
+  $('#c-me').value = READ.measure;   $('#o-me').textContent = READ.measure + 'ch';
+  $('#c-gp').value = READ.gap;       $('#o-gp').textContent = READ.gap.toFixed(1) + 'em';
+  $('#c-num').checked = READ.numbers;
+  $('#c-serif').checked = READ.serif;
+  $('#c-numeral').checked = READ.numerals;
+  if(save !== false) try{ localStorage.setItem('pg.read', JSON.stringify(READ)); }catch(e){}
+}
+function wireRead(){
+  try{ READ = {...READ_DEFAULTS, ...JSON.parse(localStorage.getItem('pg.read')||'{}')}; }catch(e){}
+  const bind = (id, key, num) => $(id).addEventListener('input', e => {
+    READ[key] = num ? parseFloat(e.target.value) : e.target.checked; applyRead();
+  });
+  bind('#c-fs','fs',1); bind('#c-lh','lh',1); bind('#c-me','measure',1); bind('#c-gp','gap',1);
+  bind('#c-num','numbers',0); bind('#c-serif','serif',0); bind('#c-numeral','numerals',0);
+  $('#c-reset').onclick = () => { READ = {...READ_DEFAULTS}; applyRead(); };
+  applyRead(false);
+}
 
 /* ---------------- popover plumbing ---------------- */
 // Native popover + CSS anchor positioning: light-dismiss, top layer and placement
@@ -168,12 +300,14 @@ let CARD = null, figIndex = 0;
 let popSeq = 0;
 function makePop(triggerLabel, title, bodyHTML, opts={}){
   const id = `pop-${++popSeq}`, anchor = `--a${popSeq}`;
-  const cls = ['chip', opts.warn ? 'warn' : '', opts.zero ? 'zero' : ''].filter(Boolean).join(' ');
+  const cls = ['chip', opts.warn?'warn':'', opts.zero?'zero':'', opts.epo?'epo':''].filter(Boolean).join(' ');
   // The count lives in a <b>, which some AT flattens away — restate it in the label.
   const aria = esc(`${triggerLabel.replace(/<[^>]+>/g, '')}｜${title}`);
-  const chip = `<button class="${cls}" popovertarget="${id}" data-anchor="${anchor}" aria-label="${aria}">${triggerLabel}</button>`;
+  const chip = `<button class="${cls}" popovertarget="${id}" data-anchor="${anchor}"${
+      opts.id?` id="${opts.id}"`:''} aria-label="${aria}">${triggerLabel}</button>`;
   const pop  = `<div id="${id}" popover data-anchor="${anchor}">
-      <div class="pop-h">${esc(title)}</div><div class="pop-b">${bodyHTML}</div></div>`;
+      <div class="pop-h">${esc(title)}</div><div class="pop-b"${
+      opts.bodyId?` id="${opts.bodyId}"`:''}>${bodyHTML}</div></div>`;
   return {chip, pop};
 }
 function wireAnchors(){
@@ -192,11 +326,13 @@ function capNote(b){
     ? `<div class="trunc">只顯示前 ${b.cap} 筆，實際共 ${b.total} 筆（沒有靜默截斷）</div>` : '';
 }
 const reasonOf = f => ((CARD.missing||[]).find(m=>m.field===f)||{}).reason;
+const pad4 = n => ('0000' + n).slice(-4);
 
 /* ---------------- document bar ---------------- */
 function renderDocBar(c){
   const P=[], C=[];
   const add = (label,title,body,opts) => { const p=makePop(label,title,body,opts); C.push(p.chip); P.push(p.pop); };
+  const ops = c.ops || null;
 
   add(`書目`, '書目資料', `<dl>
       <dt>公開／公告號</dt><dd class="mono">${esc(c.number)}</dd>
@@ -214,11 +350,16 @@ function renderDocBar(c){
         `<tr><td class="mono">${esc(x.code)}</td><td>${esc(x.description||'')}</td></tr>`))
       + capNote(c.classifications), {zero:!c.classifications.total});
 
-  add(`同族 <b>${c.family.total}</b>`, '同族申請案 (family)',
+  add(`同族 <b>${c.family.total}</b>`, '同族申請案 (Google Patents)',
       table(['申請號','公開號','狀態','優先權日'], (c.family.items||[]).map(x=>
         `<tr><td class="mono">${esc(x.application_number)}</td><td class="mono">${esc(x.publication)}</td>
              <td>${esc(x.status||'')}</td><td>${esc(x.priority_date||'')}</td></tr>`))
       + capNote(c.family), {zero:!c.family.total});
+
+  // INPADOC costs two OPS calls, so it is fetched when the reader asks for it.
+  add(`INPADOC <b>EPO</b>`, 'INPADOC 同族與法律事件（EPO OPS）',
+      `<p class="reason">點開時才向 EPO 取得（兩次呼叫，計入配額）。</p>`,
+      {epo:true, id:'inpadocchip', bodyId:'inpadocbody'});
 
   add(`相似 <b>${c.similar_documents.total}</b>`, '相似文件（Google 建議，可作研究方向線索）',
       table(['公開號','日期','標題'], (c.similar_documents.items||[]).map(x=>
@@ -233,19 +374,24 @@ function renderDocBar(c){
          (c.backward_citations.items||[]).map(n=>`<a href="#" data-jump="${esc(n)}">${esc(n)}</a>`).join(' · ') || '—'}</div>
        ${capNote(c.backward_citations)}`);
 
-  add(`法律 <b>${c.legal_events.total}</b>`, '法律事件',
+  add(`法律 <b>${c.legal_events.total}</b>`, '法律事件（Google Patents）',
       table(['日期','事件','類型'], (c.legal_events.items||[]).map(x=>
         `<tr><td class="mono">${esc(x.date||'')}</td><td>${esc(x.title||'')}</td><td>${esc(x.type||'')}</td></tr>`))
       + capNote(c.legal_events), {zero:!c.legal_events.total});
 
   const miss = c.missing||[];
+  const epoRows = ops && ops.available ? [
+      `<tr><td class="mono">images</td><td>EPO OPS</td><td class="mono">${
+        esc(ops.drawings ? ops.drawings.link + ` (${ops.drawings.pages}p)` : '（此件無單獨圖式）')}</td></tr>`,
+      `<tr><td class="mono">original_document</td><td>EPO OPS</td><td class="mono">${
+        esc(ops.fullimage ? ops.fullimage.link + ` (${ops.fullimage.pages}p)` : '—')}</td></tr>`] : [];
   add(`來源${miss.length?` <b>⚠${miss.length}</b>`:''}`, '欄位來源與缺漏',
       (miss.length ? `<p class="reason"><b>此來源拿不到的欄位：</b></p>` +
         miss.map(m=>`<p class="reason"><code>${esc(m.field)}</code> — ${esc(m.reason)}</p>`).join('')
         : `<p class="reason ok">此件所有欄位皆取得。</p>`) +
       table(['欄位','來源','命中的選擇器'], Object.entries(c.provenance||{}).map(([k,v])=>
         `<tr><td class="mono">${v.present?'':'· '}${esc(k)}</td><td>${esc(v.source)}</td>
-             <td class="mono">${esc(v.selector||'（未命中）')}</td></tr>`)),
+             <td class="mono">${esc(v.selector||'（未命中）')}</td></tr>`).concat(epoRows)),
       {warn:miss.length>0});
 
   add(`原站`, '在原始網站開啟', `<div class="poplinks">
@@ -253,9 +399,38 @@ function renderDocBar(c){
       <a href="${esc(c.links.espacenet)}" target="_blank" rel="noopener">Espacenet（圖式與原檔）↗</a>
       <a href="${esc(c.links.patentscope)}" target="_blank" rel="noopener">PATENTSCOPE ↗</a></div>`);
 
-  const pdf = c.pdf_link
-    ? `<a class="chip" href="${esc(c.pdf_link)}" target="_blank" rel="noopener" style="text-decoration:none">原文件 PDF ↗</a>`
-    : `<span class="chip warn" title="${esc(reasonOf('pdf_link')||'')}">無 PDF</span>`;
+  // EPO state is a first-class chip: it says what OPS added, or why it added nothing.
+  if(ops){
+    const secs = ops.fullimage && ops.fullimage.sections && ops.fullimage.sections.length
+      ? `<dl>${ops.fullimage.sections.map(s=>`<dt>${esc(s.name)}</dt><dd>第 ${s.start} 頁起</dd>`).join('')}</dl>`
+      : '';
+    add(ops.available ? `EPO <b>${ops.drawings?ops.drawings.pages+'圖':'—'}/${ops.fullimage?ops.fullimage.pages+'頁':'—'}</b>`
+                      : `EPO <b>✕</b>`,
+        'EPO OPS 補強', ops.available
+          ? `<dl><dt>OPS 解析為</dt><dd class="mono">${esc(ops.resolved)}</dd>
+                 <dt>圖式頁</dt><dd>${ops.drawings? ops.drawings.pages+' 頁（300 dpi 掃描）':'此件無單獨圖式'}</dd>
+                 <dt>原文件</dt><dd>${ops.fullimage? ops.fullimage.pages+' 頁':'—'}</dd></dl>
+             ${secs ? `<p class="reason" style="margin-top:10px">原文件分節：</p>${secs}`:''}
+             ${ops.reason?`<p class="reason">${esc(ops.reason)}</p>`:''}
+             <p class="reason mono" style="margin-top:10px">${esc(ops.quota||'')}</p>
+             <p class="reason">OPS 條款 3.2：這些資料僅供本機自用，不得對外提供。</p>`
+          : `<p class="reason">${esc(ops.reason||'EPO OPS 目前不可用。')}</p>`,
+        {epo:ops.available, warn:!ops.available});
+  }
+
+  let pdf;
+  if(c.pdf_link){
+    pdf = `<a class="chip" href="${esc(c.pdf_link)}" target="_blank" rel="noopener"
+              style="text-decoration:none">原文件 PDF ↗</a>`;
+  } else if(ops && ops.available && ops.fullimage){
+    const n = ops.fullimage.pages;
+    pdf = `<a class="chip epo" style="text-decoration:none" target="_blank" rel="noopener"
+              title="Google 沒有此件 PDF。改由 EPO 逐頁取回後合併，${n} 頁約需 ${Math.ceil(n*0.7)} 秒。"
+              href="/api/ops/pdf?link=${encodeURIComponent(ops.fullimage.link)}&pages=${n}&name=${encodeURIComponent(c.number)}"
+           >原文件 PDF · EPO ${n} 頁 ↗</a>`;
+  } else {
+    pdf = `<span class="chip warn" title="${esc(reasonOf('pdf_link')||'')}">無 PDF</span>`;
+  }
   const store = c._from_store ? `<span class="chip" title="來自本地庫，未重新抓取">庫存 ${esc((c._fetched_at||'').slice(0,10))}</span>` : '';
 
   $('#docbar').innerHTML = `
@@ -268,85 +443,236 @@ function renderDocBar(c){
   $('#pops').innerHTML = P.join('');
   $('#docbar').style.display = '';
   $('#title').onclick = e => e.currentTarget.classList.toggle('open');
+  const chip = $('#inpadocchip');
+  if(chip) chip.addEventListener('click', () => loadInpadoc(c.number), {once:true});
+  wireAnchors();
 }
 
 /* ---------------- reading area ---------------- */
-function renderReader(c){
-  const claims = c.claims||[], indep = claims.filter(x=>!x.dependent), dep = claims.filter(x=>x.dependent);
-  const claimHTML = x => `<div class="claim ${x.dependent?'dep':'indep'}">
-      <div class="tag">${x.dependent?'附屬項':'獨立項'} · Claim ${esc(x.num)}</div><div>${esc(x.text)}</div></div>`;
+function blocksHTML(blocks){
+  if(!blocks || !blocks.length) return null;
+  let out = '', sec = 0;
+  for(const b of blocks){
+    const rich = b.rich || esc(b.text);
+    if(b.type === 'heading')   out += `<h3 class="sec" id="sec-${sec++}">${rich}</h3>`;
+    else if(b.type === 'para') out += `<p class="para">${b.num?`<span class="pnum">${esc(pad4(b.num))}</span>`:''}${rich}</p>`;
+    else if(b.type === 'li')   out += `<div class="bullet l${Math.min(b.level||1,3)}">${rich}</div>`;
+    else                       out += `<pre class="pre">${esc(b.text)}</pre>`;
+  }
+  return `<div class="doc">${out}</div>`;
+}
+function claimHTML(x){
+  const parts = (x.parts||[]).map(p =>
+    `<div class="part d${Math.min(p.depth||1,3)}">${p.rich || esc(p.text)}</div>`).join('');
+  const lead = x.lead_rich || esc(x.lead || x.text || '');
+  const refs = (x.refs && x.refs.length) ? `<span class="ref">依附 claim ${x.refs.join(', ')}</span>` : '';
+  return `<div class="claim ${x.dependent?'dep':'indep'}" id="claim-${esc(x.num)}">
+      <div class="tag"><span>${x.dependent?'附屬項':'獨立項'} · Claim ${esc(x.num)}</span>${refs}</div>
+      <div class="lead">${lead}</div>${parts}</div>`;
+}
 
-  const TAB = {
+function tabsOf(c){
+  const claims = c.claims||[], indep = claims.filter(x=>!x.dependent), dep = claims.filter(x=>x.dependent);
+  const blocks = c.description_blocks || [];
+  const descHTML = blocksHTML(blocks)
+    || `<div class="doc flat">${esc(c.description||'（無說明書全文）')}</div>`;
+  const structured = blocks.length ? `${blocks.length} 段` : '未分段';
+  return {
     abstract:{label:'摘要', note:`${(c.abstract||'').length} 字元`,
-              html:`<div class="prose">${esc(c.abstract)}</div>`},
-    claims:{label:`請求項 ${claims.length}`, note:`獨立項 ${indep.length} / 附屬項 ${dep.length}`,
+              html:`<div class="doc">${esc(c.abstract||'（無摘要）')}</div>`},
+    claims:{label:`請求項 ${claims.length}`,
+            note:`獨立項 ${indep.length} / 附屬項 ${dep.length}`,
             html: claims.length
               ? indep.map(claimHTML).join('') +
-                (dep.length?`<details class="deps"><summary>展開 ${dep.length} 項附屬項</summary>${dep.map(claimHTML).join('')}</details>`:'')
-              : `<div class="prose">${esc(c.claims_text||'（無）')}</div>`},
-    description:{label:'說明書', note:`${(c.description||'').length.toLocaleString()} 字元`,
-                 html:`<div class="prose">${esc(c.description)}</div>`}
+                (dep.length?`<details class="deps" open><summary>附屬項 ${dep.length} 項（點擊收合）</summary>${dep.map(claimHTML).join('')}</details>`:'')
+              : `<div class="doc flat">${esc(c.claims_text||'（無）')}</div>`},
+    description:{label:'說明書',
+                 note:`${(c.description||'').length.toLocaleString()} 字元 · ${structured}`,
+                 html: descHTML}
   };
+}
 
-  const imgs = c.images||[];
-  const figs = imgs.length ? `
-      <div class="figtop"><img id="figbig" src="${esc(imgs[0])}" alt="圖式 1"></div>
-      <div class="figbar">
-        <button id="figprev" title="上一張（←）">‹</button>
-        <span class="n" id="fign">1 / ${imgs.length}</span>
-        <button id="fignext" title="下一張（→）">›</button>
-        <div class="thumbs" id="thumbs">${imgs.map((u,i)=>
-          `<img src="${esc(u)}" data-i="${i}" class="${i?'':'on'}" loading="lazy" alt="圖 ${i+1}"
-                onerror="this.style.display='none'">`).join('')}</div>
-      </div>` : `
-      <div class="figtop"><div class="figempty">${esc(reasonOf('images')||'此件無圖式')}
-        ${c.images_declared ? `<br><br><span class="mono">（頁面宣告 ${c.images_declared} 張，實測無法取得）</span>` : ''}
-        ${c.pdf_link?`<br><br><a href="${esc(c.pdf_link)}" target="_blank" rel="noopener">改開原文件 PDF ↗</a>`:''}
-      </div></div>`;
+function renderReader(c){
+  const TAB = tabsOf(c);
+  const headings = (c.description_blocks||[]).filter(b=>b.type==='heading');
 
   $('#stage').innerHTML = `
     <div class="pane text">
       <div class="tabs" id="tabs">
         ${Object.entries(TAB).map(([k,t],i)=>`<button data-t="${k}" class="${i?'':'on'}">${esc(t.label)}</button>`).join('')}
-        <span class="spacer"></span><span class="note" id="tabnote">${esc(TAB.abstract.note)}</span>
+        <span class="spacer"></span>
+        ${headings.length?`<button class="tool" popovertarget="pop-outline" title="跳到章節">章節 ${headings.length}</button>`:''}
+        <button class="tool" popovertarget="pop-read" title="字級、行距、行寬、段落編號">閱讀</button>
+        <span class="note" id="tabnote">${esc(TAB.abstract.note)}</span>
       </div>
+      <div class="prog"><i id="progbar"></i></div>
       <div class="body" id="tabbody">${TAB.abstract.html}</div>
     </div>
     <div class="split" id="split" title="拖曳調整左右比例"></div>
-    <div class="pane figs">${figs}</div>`;
+    <div class="pane figs" id="figpane"></div>`;
+
+  TABKEY = 'abstract';
+  $('#outlinebody').innerHTML = headings.map((h,i)=>
+    `<button data-sec="${i}">${esc(h.text)}</button>`).join('') || '<p class="reason">此件沒有章節標題。</p>';
 
   $('#tabs').onclick = e => {
     const b = e.target.closest('button[data-t]'); if(!b) return;
-    [...$('#tabs').querySelectorAll('button')].forEach(x=>x.classList.toggle('on', x===b));
-    $('#tabbody').innerHTML = TAB[b.dataset.t].html;
-    $('#tabnote').textContent = TAB[b.dataset.t].note;
-    $('#tabbody').scrollTop = 0;
+    showTab(b.dataset.t, TAB);
   };
-
-  if(imgs.length) wireFigures(imgs);
+  $('#tabbody').addEventListener('scroll', e => {
+    const el = e.target, max = el.scrollHeight - el.clientHeight;
+    $('#progbar').style.setProperty('--p', (max>0 ? (el.scrollTop/max*100) : 0).toFixed(1) + '%');
+  });
+  window.__TAB = TAB;
+  // ?tab=claims / ?tab=description makes a specific reading view linkable too.
+  const want = new URLSearchParams(location.search).get('tab');
+  if(want && TAB[want]) showTab(want, TAB);
+  renderFigures(c);
   wireSplitter();
 }
 
-function wireFigures(imgs){
-  figIndex = 0;
-  const big=$('#figbig'), thumbs=$('#thumbs'), n=$('#fign');
-  const show = i => {
-    figIndex = (i + imgs.length) % imgs.length;
-    big.src = imgs[figIndex]; big.classList.remove('zoom'); n.textContent = `${figIndex+1} / ${imgs.length}`;
-    [...thumbs.children].forEach((t,j)=>t.classList.toggle('on', j===figIndex));
-    thumbs.children[figIndex]?.scrollIntoView({block:'nearest',inline:'nearest'});
-  };
-  thumbs.onclick = e => { if(e.target.dataset.i!=null) show(+e.target.dataset.i); };
-  big.onclick = () => big.classList.toggle('zoom');
+function showTab(key, TAB){
+  TAB = TAB || window.__TAB; if(!TAB || !TAB[key]) return;
+  TABKEY = key;
+  [...$('#tabs').querySelectorAll('button[data-t]')].forEach(x=>x.classList.toggle('on', x.dataset.t===key));
+  $('#tabbody').innerHTML = TAB[key].html;
+  $('#tabnote').textContent = TAB[key].note;
+  $('#tabbody').scrollTop = 0;
+  $('#progbar').style.setProperty('--p','0%');
+  const url = new URL(location.href);         // keep the view shareable
+  url.searchParams.set('tab', key);
+  history.replaceState(null, '', url);
+}
+
+/* ---------------- figures: Google PNGs or EPO page images ---------------- */
+function figSrc(i){
+  if(FIGS.mode === 'google') return FIGS.urls[i];
+  if(FIGS.mode === 'ops')    return `/api/ops/page?link=${encodeURIComponent(FIGS.link)}&page=${i+1}`;
+  return '';
+}
+function renderFigures(c, forceMode){
+  const g = c.images || [];
+  const ops = c.ops && c.ops.available ? c.ops : null;
+  FIGS.google = g;
+  // Old documents often have no separate Drawing instance at OPS — but their
+  // drawings are still there, inside the scanned original. The section map says
+  // which page they start on, so the viewer opens there instead of giving up.
+  const drawStart = (i) => (((i && i.sections) || []).find(s => s.name === 'DRAWINGS') || {}).start;
+  const start = ops && ops.fullimage ? drawStart(ops.fullimage) : undefined;
+  FIGS.ops = ops && ops.drawings ? {...ops.drawings, whole:false, start:1, hasDrawings:true}
+           : ops && ops.fullimage ? {...ops.fullimage, whole:true, start:start||1, hasDrawings:!!start}
+           : null;
+  // Google's PNGs are free and instant, so they lead when they exist; EPO's
+  // 300 dpi sheets are the fallback, and the opt-in when both are available.
+  const useOps = FIGS.ops && (forceMode === 'ops' || (!g.length && forceMode !== 'google'));
+  if(useOps)         { FIGS.mode='ops'; FIGS.urls=[]; FIGS.pages=FIGS.ops.pages; FIGS.link=FIGS.ops.link; }
+  else if(g.length)  { FIGS.mode='google'; FIGS.urls=g; FIGS.pages=g.length; FIGS.link=''; }
+  else               { FIGS.mode='none'; FIGS.pages=0; }
+  FIGS.i = useOps && FIGS.ops.whole ? Math.min(FIGS.ops.start, FIGS.pages) - 1 : 0;
+
+  const pane = $('#figpane');
+  if(FIGS.mode === 'none'){
+    const why = reasonOf('images') || '此件無圖式';
+    const epoWhy = c.ops ? `<br><br><span class="mono">EPO：${
+        esc(c.ops.available ? (c.ops.reason || '此件在 OPS 沒有可取用的影像。') : (c.ops.reason||''))}</span>` : '';
+    pane.innerHTML = `<div class="figtop"><div class="figempty">${esc(why)}
+        ${c.images_declared?`<br><br><span class="mono">（頁面宣告 ${c.images_declared} 張，實測無法取得）</span>`:''}
+        ${epoWhy}
+        ${c.pdf_link?`<br><br><a href="${esc(c.pdf_link)}" target="_blank" rel="noopener">改開原文件 PDF ↗</a>`:''}
+      </div></div>`;
+    return;
+  }
+
+  const both = FIGS.google.length && FIGS.ops;
+  const srcLabel = FIGS.mode==='google' ? 'Google Patents'
+                 : !FIGS.ops.whole ? 'EPO OPS · 300 dpi 圖式'
+                 : FIGS.ops.hasDrawings ? `EPO OPS · 原文件掃描（圖式自第 ${FIGS.ops.start} 頁起）`
+                 : 'EPO OPS · 原文件掃描（此件無獨立圖式頁）';
+  const strip = FIGS.mode==='google'
+    ? `<div class="thumbs" id="thumbs">${FIGS.urls.map((u,i)=>
+        `<img src="${esc(u)}" data-i="${i}" class="${i?'':'on'}" loading="lazy" alt="圖 ${i+1}"
+              onerror="this.style.display='none'">`).join('')}</div>`
+    // Numbered strip, not thumbnails: each EPO page is a separate metered fetch.
+    : `<div class="pages" id="pagestrip">${Array.from({length:FIGS.pages},(_,i)=>
+        `<button data-i="${i}" class="${i?'':'on'}">${i+1}</button>`).join('')}</div>`;
+
+  pane.innerHTML = `
+      <div class="figtop">
+        <img id="figbig" alt="圖式 1">
+        <div class="figwait" id="figwait">載入中…</div>
+        <div class="figsrc">${esc(srcLabel)}${both?`<button id="figswap">${
+            FIGS.mode==='google'?'改用 EPO 高解析':'改用 Google'}</button>`:''}</div>
+        <div class="fighint" id="fighint" style="display:none"></div>
+      </div>
+      <div class="figbar">
+        <button id="figprev" title="上一張（←）">‹</button>
+        <span class="n" id="fign">1 / ${FIGS.pages}</span>
+        <button id="fignext" title="下一張（→）">›</button>
+        ${strip}
+      </div>`;
+  wireFigures();
+  figShow(FIGS.i);
+}
+
+function figShow(i, hint){
+  if(FIGS.mode==='none' || !FIGS.pages) return;
+  FIGS.i = (i + FIGS.pages) % FIGS.pages;
+  const big = $('#figbig'), wait = $('#figwait');
+  if(!big) return;
+  big.classList.remove('zoom');
+  if(wait) wait.style.display = 'flex';
+  big.src = figSrc(FIGS.i);
+  $('#fign').textContent = `${FIGS.i+1} / ${FIGS.pages}`;
+  const strip = $('#thumbs') || $('#pagestrip');
+  if(strip){
+    [...strip.children].forEach((el,j)=>el.classList.toggle('on', j===FIGS.i));
+    strip.children[FIGS.i]?.scrollIntoView({block:'nearest', inline:'nearest'});
+  }
+  const h = $('#fighint');
+  if(h){
+    if(hint){ h.textContent = hint; h.style.display=''; }
+    else h.style.display = 'none';
+  }
+  // The next page is one metered fetch ahead; browsing feels instant without
+  // pulling the whole document.
+  if(FIGS.mode==='ops' && FIGS.pages > 1){ const n = new Image(); n.src = figSrc((FIGS.i+1)%FIGS.pages); }
+}
+
+function wireFigures(){
+  const big = $('#figbig'), wait = $('#figwait');
+  big.onload = () => { if(wait) wait.style.display='none'; };
   // A drawing that 404/403s must say so, never render as a broken-image glyph.
   big.onerror = () => {
-    big.replaceWith(Object.assign(document.createElement('div'), {
-      className:'figempty',
-      textContent:`第 ${figIndex+1} 張圖無法載入（來源拒絕存取）。其餘圖片可能仍可檢視。`}));
+    if(wait){ wait.textContent = `第 ${FIGS.i+1} 張圖無法載入（來源拒絕存取）。其餘圖片可能仍可檢視。`;
+              wait.style.display='flex'; }
   };
-  $('#figprev').onclick = () => show(figIndex-1);
-  $('#fignext').onclick = () => show(figIndex+1);
-  window.figShow = show;
+  big.onclick = () => big.classList.toggle('zoom');
+  $('#figprev').onclick = () => figShow(FIGS.i-1);
+  $('#fignext').onclick = () => figShow(FIGS.i+1);
+  const strip = $('#thumbs') || $('#pagestrip');
+  if(strip) strip.onclick = e => {
+    const t = e.target.closest('[data-i]'); if(t) figShow(+t.dataset.i);
+  };
+  const swap = $('#figswap');
+  if(swap) swap.onclick = () => renderFigures(CARD, FIGS.mode==='google' ? 'ops' : 'google');
+}
+
+/* FIG. n -> a sheet. The mapping is a guess and says so: a sheet can carry
+   several figures, and figure 5 is not necessarily on sheet 5. */
+function figJump(n){
+  if(!FIGS.pages){ return; }
+  const idx = Math.min(Math.max(1, n), FIGS.pages) - 1;
+  figShow(idx, `由 FIG. ${n} 推測為第 ${idx+1} 張（一張圖頁可能含多個 FIG.）`);
+}
+function claimJump(num){
+  // showTab replaces the tab body synchronously, so the target exists right
+  // away: no requestAnimationFrame, which never fires in a hidden document.
+  showTab('claims');
+  const el = document.getElementById('claim-' + num);
+  if(!el) return;
+  el.scrollIntoView({block:'center'});
+  el.classList.add('flash');
+  setTimeout(()=>el.classList.remove('flash'), 1400);
 }
 
 function wireSplitter(){
@@ -369,6 +695,45 @@ function wireSplitter(){
   bar.addEventListener('dblclick', () => apply(55));
 }
 
+/* ---------------- EPO enrichment ---------------- */
+async function enrich(c){
+  try{
+    const r = await fetch('/api/enrich?q=' + encodeURIComponent(c.number));
+    const e = await r.json();
+    if(!CARD || CARD.number !== c.number) return;      // the user moved on
+    CARD.ops = e;
+    renderDocBar(CARD);
+    // Re-render the drawing pane keeping whatever source is already showing:
+    // Google's images stay put, but the EPO high-resolution option now exists,
+    // and a document Google had nothing for finally gets its sheets.
+    renderFigures(CARD, FIGS.mode === 'none' ? undefined : FIGS.mode);
+  }catch(err){ /* enrichment is additive: its failure must not disturb the card */ }
+}
+
+async function loadInpadoc(number){
+  const body = $('#inpadocbody');
+  if(!body) return;
+  body.innerHTML = '<p class="reason">向 EPO 取得中…</p>';
+  try{
+    const d = await (await fetch('/api/ops/inpadoc?q=' + encodeURIComponent(number))).json();
+    if(!d.available){ body.innerHTML = `<p class="reason">${esc(d.reason||'EPO OPS 不可用。')}</p>`; return; }
+    const fam = table(['公開號','國別','公開日','申請號'], (d.family||[]).map(m=>
+      `<tr><td class="mono"><a href="#" data-jump="${esc(m.publication)}">${esc(m.publication)}</a></td>
+           <td>${esc(m.country||'')}</td><td class="mono">${esc(m.date||'')}</td>
+           <td class="mono">${esc(m.application||'')}</td></tr>`));
+    const legal = table(['日期','事件','說明'], (d.legal||[]).map(e=>
+      `<tr><td class="mono">${esc(e.date||'')}</td><td>${esc(e.title||'')}</td>
+           <td>${esc(e.detail||'')}</td></tr>`));
+    body.innerHTML = `<p class="reason">INPADOC 同族 ${(d.family||[]).length} 件</p>${fam}
+        ${d.family_reason?`<p class="reason">${esc(d.family_reason)}</p>`:''}
+        <p class="reason" style="margin-top:14px">法律事件 ${(d.legal||[]).length} 筆</p>${legal}
+        ${d.legal_reason?`<p class="reason">${esc(d.legal_reason)}</p>`:''}
+        <p class="reason mono" style="margin-top:10px">${esc(d.quota||'')}</p>`;
+  }catch(err){
+    body.innerHTML = `<p class="reason">取得失敗：${esc(err.message)}</p>`;
+  }
+}
+
 /* ---------------- flow ---------------- */
 function welcome(msg){
   $('#docbar').style.display='none'; $('#pops').innerHTML=''; CARD=null;
@@ -386,7 +751,7 @@ function welcome(msg){
     s.onclick = () => { $('#q').value = s.textContent; go(false); });
 }
 
-function render(c){ CARD=c; renderDocBar(c); renderReader(c); wireAnchors(); }
+function render(c){ CARD=c; renderDocBar(c); renderReader(c); enrich(c); }
 
 async function go(refresh){
   const q=$('#q').value.trim(); if(!q) return;
@@ -397,9 +762,11 @@ async function go(refresh){
     if(!r.ok || d.error){
       welcome((d.error||('HTTP '+r.status)) + (d.tried&&d.tried.length?`（已嘗試：${d.tried.join('、')}）`:''));
     } else {
+      const tab = new URLSearchParams(location.search).get('tab');
       render(d); loadLib();
       // Deep link: the card becomes bookmarkable / shareable at ?q=<number>
-      history.replaceState(null, '', '?q=' + encodeURIComponent(d.number));
+      history.replaceState(null, '', '?q=' + encodeURIComponent(d.number) +
+                                     (tab ? '&tab=' + encodeURIComponent(tab) : ''));
     }
   } catch(e){ welcome('連線失敗：' + e.message); }
   finally{ $('#go').disabled=false; }
@@ -418,14 +785,26 @@ async function loadLib(){
 }
 
 document.addEventListener('click', e => {
+  const fig = e.target.closest('a.figref');
+  if(fig){ e.preventDefault(); figJump(parseInt(fig.dataset.fig,10)); return; }
+  const clm = e.target.closest('a.claimref');
+  if(clm){ e.preventDefault(); claimJump(clm.dataset.claim); return; }
+  const sec = e.target.closest('[data-sec]');
+  if(sec){
+    e.preventDefault();
+    document.querySelectorAll('[popover]').forEach(p=>{try{p.hidePopover()}catch(_){}});
+    if(TABKEY!=='description') showTab('description');
+    document.getElementById('sec-'+sec.dataset.sec)?.scrollIntoView({block:'start'});
+    return;
+  }
   const j = e.target.closest('[data-jump]');
   if(j){ e.preventDefault(); document.querySelectorAll('[popover]').forEach(p=>{try{p.hidePopover()}catch(_){}}) ;
          $('#q').value = j.dataset.jump; go(false); }
 });
 document.addEventListener('keydown', e => {
-  if(e.target.tagName==='INPUT') return;
-  if(e.key==='ArrowLeft' && window.figShow) window.figShow(figIndex-1);
-  if(e.key==='ArrowRight'&& window.figShow) window.figShow(figIndex+1);
+  if(e.target.tagName==='INPUT' || e.target.tagName==='TEXTAREA') return;
+  if(e.key==='ArrowLeft') figShow(FIGS.i-1);
+  if(e.key==='ArrowRight') figShow(FIGS.i+1);
 });
 $('#go').onclick = () => go(false);
 $('#refresh').onclick = () => go(true);
@@ -433,6 +812,7 @@ $('#q').addEventListener('keydown', e => { if(e.key==='Enter') go(false); });
 
 const saved = localStorage.getItem('pg.split');
 if(saved) document.documentElement.style.setProperty('--split', saved);
+wireRead();
 loadLib();
 const deep = new URLSearchParams(location.search).get('q');
 if(deep){ $('#q').value = deep; go(false); } else { welcome(); }

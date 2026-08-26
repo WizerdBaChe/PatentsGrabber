@@ -2,7 +2,8 @@
 
 整合式專利閱讀工具。輸入一個專利號碼，得到一張把「可複製全文 ＋ 圖式 ＋ 原文件 ＋ 同族分類」放在同一屏的專利卡。
 
-**目前狀態：Stage 0** —— 美國專利、零金鑰、單一來源（Google Patents 單件頁）。
+**目前狀態：Stage 1（進行中）** —— 美國專利。文字來自 Google Patents 單件頁，
+**圖式與原文件 PDF 來自 EPO OPS**（需金鑰；沒有金鑰時自動退回 Stage 0 行為並說明原因）。
 
 ## 啟動
 
@@ -89,34 +90,73 @@ US2025383260A1        (Espacenet 格式)
 - **請求項逐項拆解**，獨立項置頂高亮、附屬項摺疊
 - **圖式檢視器**：縮圖列 ＋ 大圖 ＋ 點擊放大，`←` `→` 可翻頁
 
+## 為人類閱讀而做的事（其他平台沒有特別做的部分）
+
+專利說明書是 2 萬到 44 萬字元的連續文字。Google Patents、Espacenet、PATENTSCOPE
+都把它塞進一欄、寬度隨視窗、行距固定。本工具把來源**已經標好、但被丟掉**的結構撿回來：
+
+- **分段**：標題、段落、清單、表格各自成塊；`[0042]` 段號掛在左側頁邊，不擠進句子裡
+- **請求項是一棵樹**：前言一段，每個限制條件（limitation）各一行縮排；
+  `claim 1` 這種交叉引用可以點，直接跳到該項並閃一下
+- **`FIG. 3` 可以點**：點了右邊圖式就翻到該張。對應關係是**推測**（一張圖頁可能含多個 FIG.），
+  介面會明說，不會假裝精準
+- **章節跳轉**：說明書標題自動變成目錄
+- **閱讀設定**（會記住）：字級、行距、行寬、段距、段號顯示、襯線字體、元件編號高亮
+- 這些全部來自原始標記，**沒有任何 AI 改寫、摘要或翻譯**——結構拿不到就不顯示
+
+## EPO OPS 補上的兩個洞
+
+| Stage 0 的限制 | 現在 |
+|---|---|
+| 最新公開案圖檔 403、破圖 | EPO 300 dpi 圖式頁（`US20250383260A1` → 14 頁） |
+| 最新公開案沒有 PDF | EPO 逐頁取回後合併成一份 PDF（25 頁） |
+| 2000 年以前老案完全沒有圖 | 改用 EPO 的原文件掃描（`US4237224A` → 10 頁），並標明是原文件而非獨立圖式 |
+| Google 有圖時 | 仍用 Google（免費、即時），另提供「改用 EPO 高解析」切換 |
+
+圖式頁**逐頁**取用（縮圖列改成頁碼列），一次查詢只花一個影像清單呼叫，
+看過的頁面存進 `var/ops-cache/`，重看不再計入配額。
+另有 **INPADOC 同族與法律事件** chip，點開才向 EPO 取。
+
 其他：
 
 - 每個欄位標註來源；**拿不到的欄位會說明原因，不會留空白，也不會出現破圖**
-- `?q=US6285999B1` 深連結，專利卡可以加書籤或分享
+- `?q=US6285999B1` 深連結，專利卡可以加書籤或分享；加 `&tab=claims` 可直接連到某一分頁
 - 查過的每一件都會存進本地 `var/library.sqlite3`（個人專利庫，非快取），重查不會再打網路
 
 ## 已知限制（實測確認，非缺陷）
 
-- **約 2000 年以前的老專利沒有可取用的圖檔**，只有整份 PDF。
-- **最新公開案（如 2025 年）沒有 PDF，圖檔網址也回 403**——標記裡有圖，實際取不到。工具會明說，不會給你破圖。
-- 上述兩點的補救都在 Stage 1（接 EPO OPS 的 images 與 fullimage 服務）。
-- 只做美國案。EP/TW/CN/JP/KR 已明確延後。
-- 只能用號碼查，**不能用公司名檢索** —— Google Patents 的搜尋被其 `robots.txt` 排除，申請人檢索必須等 Stage 1 的 EPO OPS 金鑰。
+- **OPS 的全文不涵蓋美國案**（`CLIENT.InvalidCountryCode`，EP 對照組正常）。所以美國案的
+  文字只能來自 Google Patents，圖式與原文件只能來自 OPS——兩個來源缺一不可。
+- ~~約 2000 年以前的老專利沒有可取用的圖檔~~ → 已由 EPO 原文件掃描補上。
+- ~~最新公開案沒有 PDF、圖檔 403~~ → 已由 EPO images / fullimage 補上。
+- 只做美國案。EP/TW/CN/JP/KR 尚未支援。
+- 只能用號碼查，**還不能用公司名檢索**——Google Patents 的搜尋被其 `robots.txt` 排除；
+  申請人檢索走 EPO OPS 的 CQL，已驗證可行（`pa="Taiwan Semiconductor"` → 36,829 筆），
+  但介面尚未做（下一輪）。
+- 合併 25 頁的 EPO 原文件 PDF 約需 10–20 秒（逐頁取回），只在第一次。
 
 ## 開發者工具
 
 ```powershell
+python tools/check_reading.py             # 分段結構是否只加結構、沒吃掉字（含正／負控與儀器校正）
 python tools/probe_coverage.py            # 覆蓋率探針（用本地快取的 HTML）
 python tools/probe_coverage.py --refresh  # 重新抓取所有樣本
 python tools/smoke_service.py             # 端到端煙霧測試
+python tools/verify_ops.py                # EPO OPS 能力驗證（需金鑰）
 python tools/diag_images.py               # 圖檔網址形態診斷
-python tools/shoot.py US8046721B2 out.png # 用本機 Chrome 截圖（可加 --dark）
+python tools/shoot.py US8046721B2 out.png --tab description   # 用本機 Chrome 截圖（可加 --dark）
 ```
+
+`check_reading.py` 會刻意餵自己一份「把段落標記拿掉」的頁面，**那一份必須不通過**——
+一個永遠不會失敗的檢查等於沒有檢查。
 
 ## 文件
 
 - `docs/01-concept-note.md` —— 概念層：痛點、邊界、業務規則、資料源勘查
 - `docs/02-stage0-findings.md` —— Stage 0 實測發現與交付紀錄
+- `docs/03-ops-terms-compliance.md` —— OPS 使用條款分析（3.2 的公開散布禁令）
+- `docs/04-ops-verification-results.md` —— 金鑰能力驗證結果
+- `docs/05-stage1-spec.md` —— **Stage 1 工作規格**：規則彙整、已定案事實、工作切分、閱讀優化需求、驗收
 - `docs/archive/` —— 已被取代的文件版本（不刪除）
 
 ## 資料來源與界線

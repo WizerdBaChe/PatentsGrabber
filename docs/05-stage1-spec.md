@@ -82,6 +82,22 @@ Machine-checkable:
 3. `python tools/smoke_service.py` — end-to-end lookup still returns a card for `US6285999B1` and still fails loudly for `US99999999B2`.
 4. `/api/enrich?q=US20250383260A1` returns `drawings.pages == 14` and `fullimage.pages == 25`.
 
+### 5.1 Measured results (2026-08-26, this round)
+
+| Check | Result |
+|---|---|
+| `tools/check_reading.py` | **12/12 documents pass**, text coverage 0.992–1.000; figure-reference controls pass in both directions; calibration page (paragraph markup removed) correctly **fails** at 0.007 |
+| `tools/verify_ops.py` | **14/14** (was 11/14 at the last record; the three former reds are now asserted as expected outcomes) |
+| `tools/smoke_service.py` | **ALL PASS** |
+| `tests/test_ops_number_formats.py` | **ALL PASS** |
+| `/api/enrich?q=US20250383260A1` | `drawings.pages = 14`, `fullimage.pages = 25` ✔ |
+| Drawing actually renders | `US20250383260A1` sheet 1 loads at **2550×3300** (`naturalWidth`, not an element count — the Stage 0 lesson) |
+| `/api/ops/pdf` (10 pages) | 1,034,346 bytes, `%PDF-` magic, 11.4 s first time, **0.00 s** from cache |
+| Untrusted link rejected | `?link=../../secret` → HTTP 502, refused before any fetch |
+| No-credential degradation | card still builds (115 blocks); enrich/inpadoc/page all return an actionable reason, nothing raises |
+| Structure in the DOM | `US20250383260A1`: 86 paragraphs, 86 gutter numbers, 3 headings, 42 clickable figure references, 20 claims / 24 limitation blocks |
+| Regression, accepted Stage 0 behaviour | 294-thumbnail case: all `loading=lazy`, strip scrolls internally (2736→499 px), page does **not** overflow horizontally at 1440×900 (`scrollWidth == clientWidth == 1440`) |
+
 Human-eye (must be confirmed in the real browser; see the delivery checklist):
 
 5. `US20250383260A1` — Stage 0 showed no drawings and no PDF. Now shows EPO drawing sheets and offers the original PDF.

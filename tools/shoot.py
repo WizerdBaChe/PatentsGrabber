@@ -41,11 +41,13 @@ def main() -> int:
     ap.add_argument("--dark", action="store_true")
     ap.add_argument("--base", default="http://127.0.0.1:8000")
     ap.add_argument("--delay", type=int, default=6000, help="ms to wait for fetch+render")
+    ap.add_argument("--tab", choices=("abstract", "claims", "description"),
+                    help="which reading tab to open before the shot")
     a = ap.parse_args()
 
     out = Path(a.out).resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
-    url = f"{a.base}/?q={a.number}"
+    url = f"{a.base}/?q={a.number}" + (f"&tab={a.tab}" if a.tab else "")
 
     with tempfile.TemporaryDirectory() as profile:
         cmd = [
