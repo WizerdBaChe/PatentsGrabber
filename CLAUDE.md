@@ -50,6 +50,19 @@ carries a kind code, docdb always does, and the Espacenet display form
 (`US2025383260A1`) is an API input for neither. Pinned in
 `tests/test_ops_number_formats.py`.
 
+## Jurisdictions differ in what each source can give
+
+- **US**: text from Google Patents only. OPS full text does NOT cover US (F-1),
+  so a US document Google lacks gets bibliography + scanned original, no text.
+- **EP**: text from Google Patents when it has the document, from **OPS full
+  text** when it does not — OPS covers EP. The EPO publishes the specification
+  in the **filing language only**, so an EP case can legitimately be German or
+  French; the card states the language rather than translating (no translation
+  engine, by CIM §4 boundary 3).
+- Claim dependency detection therefore has to work in EN, DE and FR
+  (`google_patents.DEPENDS_RE`, shared by both parsers, controls in
+  `tools/check_search.py`).
+
 ## Google Patents lags OPS by months
 
 Measured 2026-08-26: of 24 US publications from 2026-06…08, Google Patents had

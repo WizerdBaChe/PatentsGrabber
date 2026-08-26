@@ -43,15 +43,28 @@ def norm(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def reference_text(html: str) -> str:
-    """The description section's own text, minus what blocks move elsewhere."""
+def reference_text(html: str) -> tuple[str, str, int]:
+    """(reference, naive, source-text nodes) for the description section.
+
+    `reference` is what the blocks should contain: the section's own text minus
+    the "Description" label, the [0001] para-num tokens, and — on machine
+    translated pages — the untranslated original, which Google ships in the DOM
+    beside the translation and hides with CSS.
+
+    `naive` keeps that original, so the two numbers together prove the drop
+    actually happened. Coverage alone cannot: the untranslated text sits in both
+    sides of that ratio.
+    """
     soup = BeautifulSoup(html, "lxml")
     section = soup.find("section", attrs={"itemprop": "description"})
     if not section:
-        return ""
-    for tag in section.find_all(["h2", "para-num"]):
+        return "", "", 0
+    naive = norm(section.get_text(" ", strip=True))
+    sources = section.find_all("span", class_="google-src-text")
+    count = len(sources)
+    for tag in section.find_all(["h2", "para-num"]) + sources:
         tag.decompose()
-    return norm(section.get_text(" ", strip=True))
+    return norm(section.get_text(" ", strip=True)), naive, count
 
 
 def analyse(path: Path) -> dict | None:
@@ -63,7 +76,7 @@ def analyse(path: Path) -> dict | None:
         return None                      # negative control page: no record at all
 
     blocks = doc.fields["description_blocks"].value or []
-    ref = reference_text(html)
+    ref, naive, source_nodes = reference_text(html)
     got = norm(" ".join(b.get("text", "") for b in blocks))
     claims = doc.fields["claim_list"].value or []
 
@@ -96,6 +109,8 @@ def analyse(path: Path) -> dict | None:
         "claim_cover": (claim_got / claim_ref) if claim_ref else 1.0,
         "ref_chars": len(ref),
         "got_chars": len(got),
+        "naive_chars": len(naive),
+        "source_nodes": source_nodes,
         "coverage": (len(got) / len(ref)) if ref else (1.0 if not blocks else 0.0),
         "empty_blocks": sum(1 for b in blocks if not (b.get("text") or "").strip()),
         "has_description": bool(ref),
@@ -146,6 +161,21 @@ def main() -> int:
         if rows and all(r[metric] == 0 for r in rows):
             failures.append((metric, "zero on EVERY document — extractor is broken, not the data"))
             print(f"  SYSTEMATIC FAILURE: {metric} is 0 on all {len(rows)} documents")
+
+    # ---- translated pages: the untranslated original must NOT be in the output
+    translated = [r for r in rows if r["source_nodes"]]
+    if translated:
+        for r in translated:
+            dropped = 1 - (r["got_chars"] / r["naive_chars"]) if r["naive_chars"] else 0
+            ok = dropped > 0.25          # the source language is roughly as long
+            print(f"  {'PASS' if ok else 'FAIL'}  {r['number']}: {r['source_nodes']} untranslated "
+                  f"source blocks in the page, {dropped:.0%} of the raw text dropped "
+                  f"({r['naive_chars']:,} -> {r['got_chars']:,} chars)")
+            if not ok:
+                failures.append((r["number"], "machine-translated page: the untranslated original "
+                                              "is still in the extracted text"))
+    else:
+        print("  note: no machine-translated page in the corpus — that check did not run")
 
     # ---- controls: the counter must say yes AND no
     by_num = {r["number"]: r for r in rows}

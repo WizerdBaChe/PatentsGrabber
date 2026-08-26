@@ -41,6 +41,12 @@ Boundaries that touch this round (CIM §4): **no public deployment** — after O
 | **F-11** | **`published-data/search/biblio` is what makes BR-8 possible.** The plain search returns document ids only; the biblio constituent carries applicant names twice — `@data-format="epodoc"` (normalised, `CORNING INC [US]`) and `"original"` (as filed, `CORNING INCORPORATED`) — plus titles, inventors and abstracts. Cost ~5–8 KB per result | measured 2026-08-26 |
 | **F-12** | **S-7, answered: the variant problem is real and includes false positives.** `pa="Corning"` over 100 results → **9 distinct normalised names, 12 as-filed**, among them `OWENS CORNING INTELLECTUAL CAPITAL` (a different company), a Ningbo hospital named 康寧, `UNIV KENT STATE OHIO` and `PAROC GROUP OY`. `pa="Taiwan Semiconductor"` → 5 normalised / 9 as-filed for essentially one company | measured 2026-08-26 |
 | **F-13** | **Google Patents lags OPS by months.** Of 24 US publications from 2026-06…2026-08 returned by OPS search, Google Patents had **0**. Since OPS sorts newest-first, the first page of a company search is precisely the part the Google-only card path cannot open | measured 2026-08-26 |
+| **F-15** | **Google Patents carries EP full text**, in markup vintages the US-only parser did not know: a `<description>` element with `<p num="0001">` paragraphs, and `<claim>` / `<claim-text>` **elements** rather than `div.claim` / `div.claim-text`. Before the fix, EP3000000A1 produced 0 blocks from 50,785 characters and EP4000000A1 produced 0 claims | measured 2026-08-26, four EP samples now in `var/raw/` |
+| **F-16** | **A machine-translated page carries BOTH languages in the DOM**: `<span class="notranslate"><span class="google-src-text">German original</span>English translation</span>`, with Google's own CSS hiding the first. Extracting it doubles every paragraph with text the reader did not ask for — and a text-coverage check cannot see it, because the untranslated half is in the flat text too. EP3000000A1: 72 such blocks, **53 % of the raw text** | measured 2026-08-26; `check_reading.py` now measures the drop explicitly |
+| **F-17** | **OPS EP full text**: `description` is `p[]` with the number inside the string (`[0001]    The invention…`); `claims` is **ONE** `claim` element whose `claim-text` entries are split by a leading `N.` — an entry without one continues the previous claim. Treating each entry as a claim renumbers the whole set | measured 2026-08-26 (EP1000000, EP4793850) |
+| **F-18** | **The EPO publishes the specification in the filing language only.** EP4794149A1 comes back in German (`@lang=DE`) and there is no translation to ask for; only the claims are translated, at grant (B1). The card states the language instead of handing over unexpected text | measured 2026-08-26 |
+| **F-19** | **Claim dependency has to be detected in EN / DE / FR.** `nach Anspruch 1` and `selon la revendication 1` are exactly as dependent as `according to claim 1`, and English `according to any of the preceding claims` carries no number at all. Before the fix, all 9 claims of a German EP case were reported independent | measured 2026-08-26; both directions pinned in `check_search.py` |
+| **F-20** | EP numbers: epodoc `EP1000000` (no kind code), docdb `EP.1000000.A1` — and the kind must be the document's actual one (`EP.1000000.A2` → 404). `pn=EP` and `(pn=US OR pn=EP)` work as search scopes | measured 2026-08-26 |
 | **F-14** | **F-2 does not generalise.** Which serial width OPS holds a publication under is per RECORD: `US.2025383260.A1` works and `US.20250383260.A1` 404s, while `US.20260189299.A1` works and `US.2026189299.A1` 404s. Both widths must be offered as candidates. What stays invariant: epodoc never carries a kind code, docdb always does, and the Espacenet display form is valid as neither | measured 2026-08-26, pinned in `tests/test_ops_number_formats.py` |
 
 > F-5/F-6/F-7 are the mechanical basis for §4. The reading optimizations below are **not** heuristics layered on flat text — they recover structure the source already publishes and Stage 0 discarded.
@@ -55,7 +61,7 @@ Boundaries that touch this round (CIM §4): **no public deployment** — after O
 | **S1-B** | INPADOC family + legal events from OPS (richer than the Google table) | **YES, on demand** | One extra call, only when the user opens the panel |
 | **S1-C** | Applicant / company CQL search + result list + BR-8 name variants | **YES** (2026-08-26, second round) | Built after the reading work landed; brought its own discovery, F-13, which forced the OPS-only card below |
 | **S1-C′** | **OPS-only card**: when Google Patents does not have a document, build the card from OPS biblio (title, applicants, inventors, dates, CPC, abstract) with the full text declared absent and the reasons stated | **YES**, forced by F-13 | Without it the first page of every company search dead-ends in "查不到" while the document sits in OPS. Provisional by construction: it is re-tried against Google on the next read |
-| **S1-D** | EP jurisdiction (EP full text via OPS, EP number parsing) | no — next round | `numbers.py` is US-only by construction; EP needs its own normalization + card path |
+| **S1-D** | EP jurisdiction (EP number parsing, EP text, EP search scope) | **YES** (2026-08-26, fourth round) | Turned out to be mostly parser work, not a second pipeline: Google Patents carries EP full text, and OPS covers EP where Google does not |
 | **S1-E** | Number normalization through OPS number-service | partial (already the last-resort path in `OpsClient.resolve`) | Promoting it to primary costs a call per lookup for no measured gain |
 
 **Degradation order if the round runs short**: drop S1-B → drop reference-numeral highlighting (§4 R-7) → drop the EPO high-resolution opt-in for documents whose Google images already work. **Guaranteed core**: S1-A for documents where Google has no usable drawings/PDF, plus §4 R-1…R-5.
@@ -150,6 +156,21 @@ Human-eye (must be confirmed in the real browser; see the delivery checklist):
 | Browser flow | list (50 rows, 7 variants) → row → OPS-only card (EPO 14 sheets / 37 pages, drawing loaded at 2550 px, description pane states the reason) → back chip returns to the list in ~1 s **without another OPS call** |
 | Worldwide toggle | unchecking 只看美國案 drops `pn=US`; rows become WO/EP/US and 37 of 50 are marked un-openable with an Espacenet link each |
 | Page cost | 50 rows ≈ 286 KB; stated in the header so the reader can see what a search costs |
+
+### 5.4 S1-D EP jurisdiction (2026-08-26, fourth round)
+
+| Check | Result |
+|---|---|
+| `tools/check_reading.py` | **20/20** documents (four EP samples added), description coverage 0.990–1.000, claim coverage 1.000 |
+| EP extraction, before → after | EP3000000A1 (translated from German) 0 → **72 blocks / 22 claims**; EP4000000A1 (WIPO OCR) 0 → **15 claims**; EP1000000A1 and EP2000000A1 unchanged |
+| Untranslated original dropped | EP3000000A1: 72 source blocks, 50,736 → 23,902 chars (**53 % dropped**), measured by the checker rather than asserted |
+| `tools/check_search.py` | **20/20**, including a nine-case both-directions control for EN/DE/FR claim dependency |
+| Claim dependency, before → after | EP4794149A1 (German): 9 of 9 claims reported independent → **1 independent, 8 dependent**; EP4793850A1: 8 → 1 independent (`according to any of the preceding claims` now caught) |
+| EP card via Google | EP1000000A1 → 28 blocks / 11 claims / 6 images; EP2000000A1 → 129 blocks / 15 claims / 8 images; `EP 1 000 000 B1` resolves to EP1000000B1 |
+| EP card via OPS (Google missing) | EP4793850A1 (published 7 days earlier) → **192 blocks / 11 claims**, full text from OPS; EP4794149A1 → 67 blocks / 9 claims, `全文語言 DE` stated on the card |
+| EP images | OPS drawings work for EP: EP1000000A1 6 sheets / 12-page original; EP4794149A1 3 sheets, sheet loaded at 2480 px |
+| Search scope | `pn=EP` → 75,230 Siemens EP publications, all EP; `(pn=US OR pn=EP)` → 105,554 mixed. Four scope chips replace the US-only checkbox |
+| BR-8 across subsidiaries | Siemens EP page 1 exposes SIEMENS AG [DE] 17, SIEMENS MOBILITY 8, SIEMENS HEALTHINEERS 6, SIEMENS GAMESA [DK] 5, SIEMENS RAIL AUTOMATION [ES] 3 — the corporate group, spelled out |
 
 ## 6. 本輪範圍決定與待裁決事項
 

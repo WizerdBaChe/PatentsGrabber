@@ -48,8 +48,8 @@ def api_patent(q: str, refresh: bool = False):
 
 
 @app.get("/api/query")
-def api_query(q: str, refresh: bool = False, field: str = "pa",
-              us_only: bool = True, start: int = 1, size: int = 50):
+def api_query(q: str, refresh: bool = False, field: str = "pa", us_only: bool = True,
+              scope: str | None = None, start: int = 1, size: int = 50):
     """The single front door: a number gives a card, anything else gives a list.
 
     BR-1 says the reader never has to declare which kind of thing they typed, so
@@ -71,14 +71,16 @@ def api_query(q: str, refresh: bool = False, field: str = "pa",
             return JSONResponse(status_code=404,
                                 content={"kind": "card", "error": str(exc),
                                          "tried": getattr(exc, "tried", [])})
-    return service.search(text, field=field, us_only=us_only, start=start, size=size)
+    return service.search(text, field=field, us_only=us_only, scope=scope,
+                          start=start, size=size)
 
 
 @app.get("/api/search")
-def api_search(q: str, field: str = "pa", us_only: bool = True,
+def api_search(q: str, field: str = "pa", us_only: bool = True, scope: str | None = None,
                start: int = 1, size: int = 50):
     """Search explicitly, e.g. when refining to one applicant-name spelling."""
-    return service.search(q.strip(), field=field, us_only=us_only, start=start, size=size)
+    return service.search(q.strip(), field=field, us_only=us_only, scope=scope,
+                          start=start, size=size)
 
 
 @app.get("/api/library")

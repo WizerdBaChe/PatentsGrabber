@@ -289,7 +289,7 @@
 <body>
 
 <div class="searchbar">
-  <div class="brand">PatentsGrabber<small>Stage 1 · US · Google Patents + EPO OPS</small></div>
+  <div class="brand">PatentsGrabber<small>Stage 1 · US + EP · Google Patents + EPO OPS</small></div>
   <input id="q" type="text" placeholder="專利號碼（US20250383260A1 · 6,285,999）或公司名（Corning · in=Larry Page）" autofocus>
   <button id="go">查詢</button>
   <button id="refresh" class="ghost" title="略過本地庫，重新抓取">重抓</button>
@@ -556,7 +556,10 @@ function renderDocBar(c){
   }
   const store = c._from_store ? `<span class="chip" title="來自本地庫，未重新抓取">庫存 ${esc((c._fetched_at||'').slice(0,10))}</span>` : '';
   const opsOnly = c._ops_only
-    ? `<span class="chip warn" title="${esc(c._ops_only_reason||'')}">書目來自 EPO OPS · 無全文</span>` : '';
+    ? `<span class="chip warn" title="${esc(c._ops_only_reason||'')}">${
+        (c.description_blocks||[]).length ? '全文來自 EPO OPS' : '書目來自 EPO OPS · 無全文'}</span>` : '';
+  const lang = c.text_language_note
+    ? `<span class="chip warn" title="${esc(c.text_language_note)}">全文語言 ${esc((c.text_language||'').toUpperCase())}</span>` : '';
   const back = RETURN_TO
     ? `<button class="chip state" id="backtolist" title="不會再打一次 EPO，結果留在記憶體裡">← ${
         esc(RETURN_TO.field_label||'')}「${esc(RETURN_TO.query||'')}」${
@@ -569,7 +572,7 @@ function renderDocBar(c){
       <span class="chip state">${c.kind_of_document==='grant'?'公告':'公開'} · ${esc(c.legal_status||'—')}</span>
       <h1 id="title" title="點擊展開完整標題">${esc(c.title)}</h1>
     </div>
-    <div class="chips">${C.join('')}<span class="sep"></span>${pdf}${opsOnly}${store}</div>`;
+    <div class="chips">${C.join('')}<span class="sep"></span>${pdf}${opsOnly}${lang}${store}</div>`;
   $('#pops').innerHTML = P.join('');
   $('#docbar').style.display = '';
   $('#title').onclick = e => e.currentTarget.classList.toggle('open');
@@ -580,7 +583,7 @@ function renderDocBar(c){
     $('#q').value = list.query || '';
     renderResults(list);
     history.replaceState(null, '', `?q=${encodeURIComponent(list.query||'')}&field=${
-      list.field||'pa'}&us=${list.us_only?1:0}${list.begin>1?'&start='+list.begin:''}`);
+      list.field||'pa'}&scope=${list.scope||'US'}${list.begin>1?'&start='+list.begin:''}`);
   };
   const chip = $('#inpadocchip');
   if(chip) chip.addEventListener('click', () => loadInpadoc(c.number), {once:true});
@@ -1027,7 +1030,7 @@ function renderResults(d){
     return r.openable
       ? `<button class="rrow" data-number="${esc(r.number)}">${head}${body}</button>`
       : `<div class="rrow closed">${head}${body}
-           <span class="why">本工具目前只讀美國案，這件是 ${esc(r.country||'?')} 案 —
+           <span class="why">本工具目前讀美國與歐洲案，這件是 ${esc(r.country||'?')} 案 —
              <a href="https://worldwide.espacenet.com/patent/search?q=pn%3D${encodeURIComponent(r.number)}"
                 target="_blank" rel="noopener">在 Espacenet 開啟 ↗</a></span></div>`;
   }).join('');
@@ -1057,7 +1060,10 @@ function renderResults(d){
           ${Object.entries(FIELDS).filter(([k])=>['pa','in','ta'].includes(k)).map(([k,label])=>
             `<button class="chip${k===d.field?' state':''}" data-field="${k}">${esc(label)}</button>`).join('')}
           <span class="sep"></span>
-          <label><input type="checkbox" id="usonly" ${d.us_only?'checked':''}> 只看美國案（可點進來讀）</label>
+          ${(d.scopes||[]).map(s =>
+            `<button class="chip${s.key===d.scope?' state':''}" data-scope="${esc(s.key)}"
+                     title="${s.key==='ALL'?'含本工具讀不了的管轄，那些列會標示出來':'在 OPS 端過濾，不是畫面過濾'}"
+             >${esc(s.label)}</button>`).join('')}
         </div>
       </div>
       <div class="rbody">
@@ -1077,15 +1083,16 @@ function renderResults(d){
       </div>
     </div>`;
 
-  $('#rprev').onclick = () => runSearch(d.query, {field:d.field, us:d.us_only,
+  $('#rprev').onclick = () => runSearch(d.query, {field:d.field, scope:d.scope,
                                                  start:Math.max(1, d.begin - d.page_size)});
-  $('#rnext').onclick = () => runSearch(d.query, {field:d.field, us:d.us_only,
+  $('#rnext').onclick = () => runSearch(d.query, {field:d.field, scope:d.scope,
                                                  start:d.begin + d.page_size});
-  $('#usonly').onchange = e => runSearch(d.query, {field:d.field, us:e.target.checked, start:1});
+  $('#stage').querySelectorAll('[data-scope]').forEach(b => b.onclick =
+    () => runSearch(d.query, {field:d.field, scope:b.dataset.scope, start:1}));
   $('#stage').querySelectorAll('[data-field]').forEach(b => b.onclick =
-    () => runSearch(d.query, {field:b.dataset.field, us:d.us_only, start:1}));
+    () => runSearch(d.query, {field:b.dataset.field, scope:d.scope, start:1}));
   $('#stage').querySelectorAll('[data-refine]').forEach(b => b.onclick =
-    () => runSearch(b.dataset.refine, {field:'pa', us:d.us_only, start:1}));
+    () => runSearch(b.dataset.refine, {field:'pa', scope:d.scope, start:1}));
   $('#stage').querySelectorAll('.rrow[data-number]').forEach(b => b.onclick = () => {
     RETURN_TO = d;                       // kept in memory: going back costs no quota
     $('#q').value = b.dataset.number;
@@ -1094,15 +1101,15 @@ function renderResults(d){
 }
 
 async function runSearch(query, opts={}){
-  const {field='pa', us=true, start=1} = opts;
+  const {field='pa', scope='US', start=1} = opts;
   busyOn(query, 'fetch');
   try{
     const url = `/api/search?q=${encodeURIComponent(query)}&field=${field}` +
-                `&us_only=${us}&start=${start}&size=50`;
+                `&scope=${encodeURIComponent(scope)}&start=${start}&size=50`;
     const d = await (await fetch(url)).json();
     renderResults(d);
     history.replaceState(null, '', `?q=${encodeURIComponent(query)}&field=${field}` +
-                                   `&us=${us?1:0}${start>1?'&start='+start:''}`);
+                                   `&scope=${scope}${start>1?'&start='+start:''}`);
   }catch(e){ welcome('檢索失敗：' + e.message); }
   finally{ busyOff(); }
 }
@@ -1115,9 +1122,10 @@ function welcome(msg){
       ${msg? `<p>${esc(msg)}</p>` : ''}
       <p>不需要先選查哪一種，系統自己分辨（點一下即填入）：</p>
       <div class="fmt">
-        <span>US20250383260A1</span><span>US 2025/0383260 A1</span><br>
-        <span>US2025383260A1</span><span>6,285,999</span><span>5960411</span>
+        <span>US20250383260A1</span><span>US 2025/0383260 A1</span><span>6,285,999</span><br>
+        <span>EP1000000A1</span><span>EP 1 000 000 B1</span><span>EP3000000</span>
       </div>
+      <p style="margin-top:10px;font-size:12.5px">純數字視為美國案；歐洲案請加 <code>EP</code>。</p>
       <p style="margin-top:14px">名字會走 EPO OPS 的欄位檢索，回傳一份可以點進去讀的列表：</p>
       <div class="fmt">
         <span>Corning</span><span>Taiwan Semiconductor</span><span>in=Larry Page</span><span>ta=fiber array</span>
@@ -1140,7 +1148,7 @@ async function go(refresh, opts={}){
     const d = await r.json();
     if(d.kind === 'results'){                 // the server decided this was a name
       renderResults(d);
-      history.replaceState(null, '', '?q=' + encodeURIComponent(q) + `&field=${d.field||'pa'}&us=${d.us_only?1:0}`);
+      history.replaceState(null, '', '?q=' + encodeURIComponent(q) + `&field=${d.field||'pa'}&scope=${d.scope||'US'}`);
     } else if(!r.ok || d.error){
       welcome((d.error||('HTTP '+r.status)) + (d.tried&&d.tried.length?`（已嘗試：${d.tried.join('、')}）`:''));
     } else {
@@ -1227,8 +1235,9 @@ if(deep){
   $('#q').value = deep;
   // A search deep link carries its own field / scope / page; a bare ?q= is
   // classified by the server exactly as if it had been typed.
-  if(url.has('field') || url.has('start') || url.has('us')){
-    runSearch(deep, {field:url.get('field')||'pa', us:url.get('us') !== '0',
+  if(url.has('field') || url.has('start') || url.has('scope') || url.has('us')){
+    runSearch(deep, {field:url.get('field')||'pa',
+                     scope:url.get('scope') || (url.get('us') === '0' ? 'ALL' : 'US'),
                      start:parseInt(url.get('start')||'1',10)});
   } else {
     go(false);

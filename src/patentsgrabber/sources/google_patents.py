@@ -43,7 +43,10 @@ MIN_DESCRIPTION_CHARS = 500  # below this, treat description as "stub, not real 
 # or _claim_list changes what it produces.
 #   1  blocks + nested claim limitations
 #   2  flat claim limitations (siblings of the preamble) also collected
-READING_SCHEMA = 2
+#   3  EP/WO vintages: <description>/<p num>, <claim>/<claim-text> elements, and
+#      the untranslated source text (span.google-src-text) excluded
+#   4  claim dependency detected in EN, DE and FR (and for "preceding claims")
+READING_SCHEMA = 4
 
 
 class FetchError(RuntimeError):
@@ -294,7 +297,31 @@ def _events(soup: BeautifulSoup) -> tuple[list[dict], str | None]:
 # A dependent claim is one that refers back to another claim. Testing the text is
 # more robust than trusting the `claim-dependent` CSS class, which is absent on
 # some vintages of the page; we use the class only as corroboration.
-_DEPENDS_RE = re.compile(r"\b(?:of|in|to|according to)\s+claims?\s+\d+", re.IGNORECASE)
+#
+# Three languages, because the EPO publishes in EN / DE / FR and a German claim
+# saying "nach Anspruch 1" is exactly as dependent as an English one saying
+# "according to claim 1" — marking it independent would put it at the top of the
+# reading pane as if it carried the scope of the invention. "any of the preceding
+# claims" carries no number at all, which is why the number is optional here.
+DEPENDS_RE = re.compile(
+    r"\b(?:"
+    r"(?:according\s+to|as\s+claimed\s+in|as\s+defined\s+in|of|in)\s+"
+    r"(?:any\s+(?:one\s+)?of\s+)?(?:the\s+)?(?:preceding\s+|previous\s+)?claims?\s*\d*"
+    r"|(?:preceding|previous)\s+claims?"
+    r"|nach\s+(?:einem\s+der\s+)?(?:vorhergehenden\s+|vorherigen\s+)?"
+    r"(?:Anspruch|Ansprüche|Ansprüchen)\s*\d*"
+    r"|gemäß\s+(?:Anspruch|Ansprüche|Ansprüchen)\s*\d*"
+    r"|selon\s+(?:l['’]une\s+(?:quelconque\s+)?des\s+)?"
+    r"(?:la\s+)?revendications?\s*(?:précédentes?\s*)?\d*"
+    r")",
+    re.IGNORECASE,
+)
+_DEPENDS_RE = DEPENDS_RE          # kept: the older private name is used below
+
+
+def _claim_texts(el) -> list:
+    """Direct-child limitations, in either markup."""
+    return [child for child in el.find_all(True, recursive=False) if _is_claim_part(child)]
 
 
 def _claim_parts(el, depth: int = 1) -> list[dict]:
@@ -306,7 +333,7 @@ def _claim_parts(el, depth: int = 1) -> list[dict]:
     claim and merely looking at it.
     """
     out: list[dict] = []
-    for child in el.find_all("div", class_="claim-text", recursive=False):
+    for child in _claim_texts(el):
         text, rich = _inline(child)
         if text:
             out.append({"depth": depth, "text": text, "rich": rich})
@@ -324,7 +351,10 @@ def _claim_list(soup: BeautifulSoup) -> tuple[list[dict], str | None]:
     if not section:
         return [], None
     out = []
-    for div in section.find_all("div", class_="claim"):
+    # div.claim on US pages, a <claim> element on OCR'd and translated ones.
+    claim_nodes = [el for el in section.find_all(["div", "claim"])
+                   if el.name == "claim" or "claim" in (el.get("class") or [])]
+    for div in claim_nodes:
         num = div.get("num")
         if not num:
             continue  # outer wrapper, not a claim
@@ -340,7 +370,7 @@ def _claim_list(soup: BeautifulSoup) -> tuple[list[dict], str | None]:
         #   flat   — limitations are SIBLINGS of the preamble's claim-text
         # Handling only the nested one silently renders a claim as its preamble,
         # which reads as a complete claim and is therefore worse than an error.
-        kids = div.find_all("div", class_="claim-text", recursive=False)
+        kids = _claim_texts(div)
         parts: list[dict] = []
         if kids:
             lead, lead_rich = _inline(kids[0])
@@ -397,7 +427,25 @@ _FIG_NUM_RE = re.compile(r"(\d+)\s*([A-Za-z])?")
 
 
 def _is_claim_part(node) -> bool:
-    return isinstance(node, Tag) and node.name == "div" and "claim-text" in (node.get("class") or [])
+    """A claim limitation, in either markup: div.claim-text or a <claim-text> element."""
+    if not isinstance(node, Tag):
+        return False
+    return node.name == "claim-text" or (
+        node.name == "div" and "claim-text" in (node.get("class") or []))
+
+
+def _is_source_text(node) -> bool:
+    """The untranslated original inside a machine-translated page.
+
+    Translated EP/WO pages carry BOTH languages in the DOM:
+    `<span class="notranslate"><span class="google-src-text">Die Erfindung
+    betrifft…</span>The invention relates to…</span>`, with Google's own CSS
+    hiding the first. Extracting it would silently double every paragraph with
+    German or Japanese the reader did not ask for — and a text-coverage check
+    would not notice, because the flat text contains it too.
+    """
+    return (isinstance(node, Tag) and node.name == "span"
+            and "google-src-text" in (node.get("class") or []))
 
 
 def _fig_number(text: str) -> str | None:
@@ -439,8 +487,8 @@ def _inline_raw(node) -> tuple[str, str]:
             continue
         if not isinstance(child, Tag):
             continue
-        if _is_claim_part(child):
-            continue  # a nested limitation is its own block, not part of this one
+        if _is_claim_part(child) or _is_source_text(child):
+            continue  # a nested limitation is its own block; source text is not ours
         name = child.name.lower()
         p, r = _inline_raw(child)
         if name == "figref":
@@ -502,6 +550,9 @@ def _block_kind(el) -> str | None:
         return "heading"
     if name == "div" and any(c in (el.get("class") or []) for c in _PARA_CLASSES):
         return "para"
+    # Machine-translated EP/WO pages number their paragraphs on a bare <p>.
+    if name == "p" and (el.get("num") or el.get("id", "").startswith("p")):
+        return "para"
     if name in ("pre", "table"):
         return "pre"
     if name == "li":
@@ -527,10 +578,12 @@ def _description_blocks(soup: BeautifulSoup) -> tuple[list[dict], str | None]:
     section = soup.find("section", attrs={"itemprop": "description"})
     if not section:
         return [], None
-    root = section.find(class_="description") or section
+    # Three carriers seen in the wild: div.description / ul.description (US) and
+    # a <description> element (machine-translated EP and WO).
+    root = section.find(class_="description") or section.find("description") or section
 
     blocks: list[dict] = []
-    for el in root.find_all(["heading", "div", "pre", "table", "li"]):
+    for el in root.find_all(["heading", "div", "pre", "table", "li", "p"]):
         kind = _block_kind(el)
         if not kind:
             continue

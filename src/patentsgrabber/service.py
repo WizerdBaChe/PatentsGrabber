@@ -48,7 +48,9 @@ SEARCH_PAGE = 50          # ~5-8 KB per result measured; 50 keeps a page under 4
 # it was written. BUMP when card_from_ops or the OPS field extraction changes.
 #   1  first version
 #   2  abstract cleaned of paragraph numbers and <3 > subscript markup
-OPS_CARD_SCHEMA = 2
+#   3  EP full text (description blocks + claims) carried when OPS has it
+#   4  claim dependency detected in EN, DE and FR
+OPS_CARD_SCHEMA = 4
 
 
 def parse_query(text: str, field: str = "pa") -> tuple[str, str]:
@@ -62,7 +64,18 @@ def parse_query(text: str, field: str = "pa") -> tuple[str, str]:
     return field, term
 
 
-def build_cql(term: str, *, field: str = "pa", us_only: bool = True) -> str:
+# Jurisdictions the reader can actually open. `pn=XX` restricts at OPS itself
+# (verified 2026-08-26); `cc` is not a valid index and `pn=US*` is refused.
+SEARCH_SCOPES = {
+    "US": ('pn=US', '只看美國案'),
+    "EP": ('pn=EP', '只看歐洲案'),
+    "USEP": ('(pn=US OR pn=EP)', '美國＋歐洲'),
+    "ALL": ("", '全世界（含讀不了的管轄）'),
+}
+
+
+def build_cql(term: str, *, field: str = "pa", us_only: bool = True,
+              scope: str | None = None) -> str:
     """Build the CQL query. The term is quoted, never concatenated raw.
 
     Inside double quotes CQL treats AND / OR / NOT as literal text, so quoting
@@ -73,11 +86,11 @@ def build_cql(term: str, *, field: str = "pa", us_only: bool = True) -> str:
     """
     safe = " ".join((term or "").replace('"', " ").split())
     cql = f'{field}="{safe}"'
-    if us_only:
-        # pn=US restricts to US publications. Verified 2026-08-26: a 50-row page
-        # of `pa="Corning" AND pn=US` came back 50/50 US. `cc=US` is not a valid
-        # index and `pn=US*` is refused (truncation needs 3 characters).
-        cql += " AND pn=US"
+    # `us_only` is the older two-state form; an explicit scope wins when given.
+    key = scope if scope in SEARCH_SCOPES else ("US" if us_only else "ALL")
+    clause = SEARCH_SCOPES[key][0]
+    if clause:
+        cql += f" AND {clause}"
     return cql
 
 DISPLAY_CAPS = {
@@ -242,7 +255,7 @@ class Service:
     # --------------------------------------------------------------- search
 
     def search(self, text: str, *, field: str = "pa", us_only: bool = True,
-               start: int = 1, size: int = SEARCH_PAGE) -> dict:
+               scope: str | None = None, start: int = 1, size: int = SEARCH_PAGE) -> dict:
         """Structured-field search over EPO OPS (BR-1's second entry point).
 
         Google Patents' search is excluded by its robots.txt (BR-7), so this can
@@ -260,7 +273,8 @@ class Service:
             return {"kind": "results", "available": False, "query": term,
                     "reason": self._ops_reason or "EPO OPS 不可用。"}
 
-        cql = build_cql(term, field=field, us_only=us_only)
+        scope = scope if scope in SEARCH_SCOPES else ("US" if us_only else "ALL")
+        cql = build_cql(term, field=field, scope=scope)
         start = max(1, min(int(start or 1), ops.SEARCH_MAX_DEPTH))
         size = max(1, min(int(size or SEARCH_PAGE), ops.SEARCH_MAX_SPAN))
         end = min(start + size - 1, ops.SEARCH_MAX_DEPTH)
@@ -291,7 +305,10 @@ class Service:
             "query": term,
             "field": field,
             "field_label": SEARCH_FIELDS[field],
-            "us_only": us_only,
+            "scope": scope,
+            "scope_label": SEARCH_SCOPES[scope][1],
+            "scopes": [{"key": k, "label": v[1]} for k, v in SEARCH_SCOPES.items()],
+            "us_only": scope == "US",
             "cql": cql,
             "page_size": size,
             "reachable": min(found["total"], ops.SEARCH_MAX_DEPTH),
@@ -327,11 +344,40 @@ class Service:
         if not row:
             return None
 
+        # OPS full text covers EP but not US (F-1, established 2026-08-23), so an
+        # EP document Google does not have is still fully readable here, while a
+        # US one can only offer its bibliography and its scanned original.
+        blocks, claims, language = [], [], None
+        if parsed.country != "US":
+            try:
+                blocks, language = ops.parse_fulltext_description(
+                    client.description(resolved, fmt=fmt))
+            except ops.OpsError:
+                pass
+            try:
+                claims, claims_language = ops.parse_fulltext_claims(
+                    client.claims(resolved, fmt=fmt))
+                language = language or claims_language
+            except ops.OpsError:
+                pass
+
         absent = (
             "Google Patents 尚未收錄此件（最新公開案常見，實測 2026 年 6–8 月的公開案"
             "一件都還沒有），而 OPS 的全文不涵蓋美國案，所以現在沒有可複製的全文。"
             "原文件掃描與圖式可以看。"
         )
+        if blocks or claims:
+            absent = ("Google Patents 尚未收錄此件，全文改由 EPO OPS 提供"
+                      "（EP 案 OPS 有全文，美國案沒有）。")
+        # The EPO publishes the specification in the filing language only, so an
+        # EP case filed in German is German here. Saying so beats handing over a
+        # wall of unexpected text and letting the reader work it out.
+        language_note = None
+        if language and language.upper() != "EN":
+            language_note = (
+                f"此件的全文語言是 {language.upper()}——EPO 只以申請語言公開說明書，"
+                "不提供翻譯（本工具不內建翻譯引擎）。請求項在核准公告 (B1) 時才有三種語言版本。"
+            )
         empty = {"items": [], "total": 0, "truncated": False, "cap": None}
         card = {
             "query": query,
@@ -342,11 +388,11 @@ class Service:
             "url": None,
             "title": row["title"],
             "abstract": row["abstract"],
-            "description": None,
-            "description_blocks": [],
-            "claims_text": None,
-            "claims": [],
-            "independent_claims": [],
+            "description": "\n\n".join(b["text"] for b in blocks) or None,
+            "description_blocks": blocks,
+            "claims_text": "\n\n".join(c["text"] for c in claims) or None,
+            "claims": claims,
+            "independent_claims": [c["num"] for c in claims if not c["dependent"]],
             "images": [],
             "images_declared": 0,
             "pdf_link": None,
@@ -361,18 +407,30 @@ class Service:
             "priority_date": None,
             "assignee": row["applicants"],
             "inventors": row["inventors"],
-            "provenance": {key: {"source": "EPO OPS", "selector": f"{fmt}/{resolved} biblio",
-                                 "present": True}
-                           for key in ("title", "abstract", "classifications",
-                                       "assignee", "inventors", "publication_date")},
+            "provenance": {
+                **{key: {"source": "EPO OPS", "selector": f"{fmt}/{resolved} biblio",
+                         "present": True}
+                   for key in ("title", "abstract", "classifications",
+                               "assignee", "inventors", "publication_date")},
+                **({"description": {"source": "EPO OPS", "present": True,
+                                    "selector": f"{fmt}/{resolved} description (full text)"}}
+                   if blocks else {}),
+                **({"claims": {"source": "EPO OPS", "present": True,
+                               "selector": f"{fmt}/{resolved} claims (full text)"}}
+                   if claims else {}),
+            },
             "missing": [{"field": field, "reason": absent}
-                        for field in ("description", "claims", "images", "pdf_link")],
+                        for field in ("description", "claims", "images", "pdf_link")
+                        if not (blocks and field == "description")
+                        and not (claims and field == "claims")],
             "links": {
                 "google": f"https://patents.google.com/patent/{row['number']}/en",
                 "espacenet": f"https://worldwide.espacenet.com/patent/search?q=pn%3D{row['number']}",
                 "patentscope": f"https://patentscope.wipo.int/search/en/result.jsf?query={row['number']}",
             },
             "ops": None,
+            "text_language": language,
+            "text_language_note": language_note,
             "_reading_schema": gp.READING_SCHEMA,
             "_ops_card_schema": OPS_CARD_SCHEMA,
             "_ops_only": True,

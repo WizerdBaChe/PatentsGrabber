@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from patentsgrabber.service import Service, build_cql, parse_query   # noqa: E402
+from patentsgrabber.sources.google_patents import DEPENDS_RE   # noqa: E402
 
 results: list[tuple[str, bool, str]] = []
 
@@ -116,7 +117,39 @@ def main() -> int:
     wrong = {k: svc.classify(k) for k, v in cases.items() if svc.classify(k) != v}
     check("numbers go to the card, names go to the search", not wrong, f"misrouted: {wrong}")
 
-    print("\n=== 7. quota ===")
+    print("\n=== 7. EP jurisdiction ===")
+    ep_numbers = {"EP1000000A1": "number", "EP 1 000 000 B1": "number", "EP3000000": "number",
+                  "EP12345678.9": "query"}   # an application number is not a publication
+    misrouted = {k: svc.classify(k) for k, v in ep_numbers.items() if svc.classify(k) != v}
+    check("EP numbers are recognised as numbers", not misrouted, f"misrouted: {misrouted}")
+
+    # Dependency detection has to work in all three EPO languages: a German claim
+    # saying "nach Anspruch 1" is dependent, and calling it independent puts it at
+    # the top of the reading pane as if it carried the invention's scope.
+    DEP_CASES = [
+        ("2. The method according to claim 1, wherein the model is trained", True),
+        ("3. A method according to any of the preceding claims", True),
+        ("2. Polaritätsschutzschaltung (1) nach Anspruch 1, wobei die erste", True),
+        ("4. Vorrichtung nach einem der vorhergehenden Ansprüche", True),
+        ("2. Dispositif selon la revendication 1, caractérisé en ce que", True),
+        ("3. Procédé selon l'une quelconque des revendications précédentes", True),
+        ("1. A computer-implemented method for managing task allocation", False),
+        ("1. Polaritätsschutzschaltung (1) umfassend:", False),
+        ("1. Dispositif de protection comprenant un circuit", False),
+    ]
+    wrong = [t for t, expected in DEP_CASES if bool(DEPENDS_RE.search(t)) is not expected]
+    check("dependent claims are detected in EN, DE and FR — and independent ones are not",
+          not wrong, f"misjudged: {wrong}")
+
+    scoped = svc.search("Siemens", field="pa", scope="EP", size=10)
+    countries = {r["country"] for r in scoped.get("results", [])}
+    check("scope=EP restricts to EP publications", countries == {"EP"},
+          f"cql={scoped.get('cql')} countries={countries} total={scoped.get('total'):,}")
+    both = svc.search("Siemens", field="pa", scope="USEP", size=10)
+    check("scope=USEP asks for both jurisdictions",
+          "(pn=US OR pn=EP)" in both.get("cql", ""), both.get("cql"))
+
+    print("\n=== 8. quota ===")
     client = svc.ops_client()
     print(f"  {client.usage.summary()}")
 

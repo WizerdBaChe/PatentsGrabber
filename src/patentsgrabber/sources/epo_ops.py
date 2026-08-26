@@ -286,6 +286,82 @@ def _abstract_text(doc: dict) -> str | None:
     return best
 
 
+_PARA_NUM_RE = re.compile(r"^\[(\d{3,5})\]\s*")
+_CLAIM_NUM_RE = re.compile(r"^(\d+)\s*\.\s*")
+# Shared with the HTML parser on purpose: "is this claim dependent" is a fact
+# about patent claims, not about where the text came from. Defined there because
+# that module needs it as a fallback for markup that omits the CSS marker.
+from .google_patents import DEPENDS_RE as _DEPENDS_RE   # noqa: E402
+
+
+def _fulltext_part(payload: dict, part: str) -> dict:
+    """The claims/description subtree of a fulltext response, whatever it nests in."""
+    for group in _walk(payload or {}, part):
+        for entry in (group if isinstance(group, list) else [group]):
+            if isinstance(entry, dict):
+                return entry
+    return {}
+
+
+def parse_fulltext_description(payload: dict) -> tuple[list[dict], str | None]:
+    """(blocks, language) — OPS full text in the shape the HTML parser makes.
+
+    OPS serves text-only: each `p` is one paragraph with its number inside the
+    string ("[0001]    The invention relates to…"). Lifting the number out of the
+    prose is what lets it render in the gutter like every other document, so an
+    EP case read from OPS looks and behaves like a US case read from HTML.
+
+    The language matters and is returned rather than assumed: the EPO publishes
+    the specification in the filing language only, so a German applicant's EP
+    case is German here, and the reader has to be told rather than handed a wall
+    of unexpected text.
+    """
+    part = _fulltext_part(payload, "description")
+    blocks: list[dict] = []
+    for paragraph in _as_list(part.get("p")):
+        text = _text(paragraph)
+        if not text:
+            continue
+        match = _PARA_NUM_RE.match(text)
+        num = match.group(1).lstrip("0") or "0" if match else None
+        body = " ".join(_PARA_NUM_RE.sub("", text).split())
+        if body:
+            blocks.append({"type": "para", "num": num, "text": body, "figs": []})
+    return blocks, part.get("@lang")
+
+
+def parse_fulltext_claims(payload: dict) -> tuple[list[dict], str | None]:
+    """(claims, language) — OPS claims as the rows the HTML parser produces.
+
+    OPS returns ONE `claim` element holding every `claim-text` of the document,
+    and the boundary between claims is typographic: an entry starting "2." is a
+    new claim, an entry that does not is a limitation continuing the current one.
+    Treating each entry as a claim (the obvious reading) renumbers the whole set
+    and reports limitations as claims.
+    """
+    part = _fulltext_part(payload, "claims")
+    claims: list[dict] = []
+    for group in _as_list(part.get("claim")):
+        for entry in _as_list((group or {}).get("claim-text") if isinstance(group, dict) else group):
+            text = " ".join((_text(entry) or "").split())
+            if not text:
+                continue
+            match = _CLAIM_NUM_RE.match(text)
+            if match or not claims:
+                claims.append({
+                    "num": match.group(1) if match else str(len(claims) + 1),
+                    "text": text, "lead": text, "parts": [], "refs": [], "dependent": False,
+                })
+            else:
+                current = claims[-1]
+                current["parts"].append({"depth": 1, "text": text})
+                current["text"] += "\n" + text
+    for claim in claims:
+        body = _CLAIM_NUM_RE.sub("", claim["text"])
+        claim["dependent"] = bool(_DEPENDS_RE.search(body))
+    return claims, part.get("@lang")
+
+
 def exchange_row(doc: dict) -> dict:
     """One `exchange-document` as a flat row.
 

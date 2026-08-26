@@ -25,8 +25,15 @@ from dataclasses import dataclass, field
 US_GRANT_KINDS = ("B2", "B1", "A")
 US_PUB_KINDS = ("A1", "A2", "A9")
 
-_KIND_RE = re.compile(r"([AB][129]?|[EPSH]\d?)$", re.IGNORECASE)
+# EP publication numbers are seven digits and the kind carries the stage:
+# A1 published with the search report, A2 without it, A3 the report itself,
+# B1 granted, B2 amended after opposition. A1 and B1 cover almost everything.
+EP_KINDS = ("A1", "B1", "A2", "A3", "B2")
+EP_SERIAL_WIDTH = 7
+
+_KIND_RE = re.compile(r"([AB][12389]?|[EPSH]\d?)$", re.IGNORECASE)
 _APPLICATION_RE = re.compile(r"^(\d{2})/(\d{3},?\d{3})$")
+_EP_APPLICATION_RE = re.compile(r"^(\d{8})\.?(\d)?$")
 
 
 class NumberError(ValueError):
@@ -64,6 +71,9 @@ class ParsedNumber:
     def ops_bodies(self) -> list[str]:
         """Number bodies OPS may hold this document under, most likely first.
 
+        Only US publication numbers have the two-width problem below; an EP
+        number is its seven-digit serial and nothing else.
+
         Publication serials are stored BOTH ways and it is per document, not per
         rule (measured 2026-08-26):
             US20260189299A1 -> docdb US.20260189299.A1   (full 7-digit serial)
@@ -72,7 +82,7 @@ class ParsedNumber:
         the document it was measured on and does not generalise. Trying both
         costs one extra 404 at worst; guessing costs the document.
         """
-        if self.kind_of_document != "publication":
+        if self.country != "US" or self.kind_of_document != "publication":
             return [self.serial]
         full = f"{self.year}{self.serial.zfill(7)}"
         short = f"{self.year}{self.serial.lstrip('0').zfill(6)}"
@@ -97,12 +107,18 @@ class ParsedNumber:
                                        else US_GRANT_KINDS)[0]
         return f"{self.country}.{body or self.ops_body}.{k}"
 
+    def kind_candidates(self) -> list[str]:
+        """Kind codes to try when the input did not carry one."""
+        if self.kind_code:
+            return [self.kind_code]
+        if self.country == "EP":
+            return list(EP_KINDS)
+        return list(US_PUB_KINDS if self.kind_of_document == "publication" else US_GRANT_KINDS)
+
     def docdb_candidates(self) -> list[str]:
         """docdb forms to try in order: every body, and every plausible kind."""
-        kinds = ([self.kind_code] if self.kind_code
-                 else list(US_PUB_KINDS if self.kind_of_document == "publication"
-                           else US_GRANT_KINDS))
-        return [self.docdb(kind, body) for body in self.ops_bodies for kind in kinds]
+        return [self.docdb(kind, body)
+                for body in self.ops_bodies for kind in self.kind_candidates()]
 
 
 def _split_kind(token: str) -> tuple[str, str | None]:
@@ -132,6 +148,10 @@ def normalize(raw: str) -> ParsedNumber:
 
 
 def _normalize_impl(raw: str, text: str) -> ParsedNumber:
+    # A bare number stays US: that is this reader's home jurisdiction and the
+    # only one where a number alone is unambiguous in practice. EP has to say so.
+    if text.startswith("EP"):
+        return _ep(raw, text[2:].strip())
     bare = text.replace("US", "", 1) if text.startswith("US") else text
     bare = bare.strip()
 
@@ -167,6 +187,51 @@ def _normalize_impl(raw: str, text: str) -> ParsedNumber:
 
     raise NumberError(
         f"{raw!r} has {len(body)} digits, which matches no known US number shape"
+    )
+
+
+def _ep(raw: str, bare: str) -> ParsedNumber:
+    """EP publication numbers: seven digits plus a kind code that carries the stage.
+
+    The kind is not decoration here — EP1000000A1 and EP1000000B1 are the
+    application as published and the patent as granted, with different claims.
+    """
+    token = re.sub(r"[\s,/\-]", "", bare)
+    if not token:
+        raise NumberError(f"no digits found in {raw!r}")
+
+    application = _EP_APPLICATION_RE.match(token)
+    if application:
+        return ParsedNumber(
+            raw=raw,
+            kind_of_document="application",
+            country="EP",
+            serial=application.group(1),
+            note=(
+                "這是 EP 申請號 (application number)，不是公開號。"
+                "公開號是 EP + 7 位數字（例如 EP1000000A1），目前只支援公開／公告號。"
+            ),
+        )
+
+    body, kind = _split_kind(token.replace(".", ""))
+    if not body.isdigit():
+        raise NumberError(f"cannot interpret {raw!r} as an EP publication number")
+    if len(body) > EP_SERIAL_WIDTH:
+        raise NumberError(
+            f"{raw!r} has {len(body)} digits; an EP publication number has "
+            f"{EP_SERIAL_WIDTH}"
+        )
+    serial = body.zfill(EP_SERIAL_WIDTH)
+    kinds = [kind] if kind else list(EP_KINDS)
+    return ParsedNumber(
+        raw=raw,
+        kind_of_document="grant" if (kind or "").upper().startswith("B") else "publication",
+        country="EP",
+        serial=serial,
+        kind_code=kind,
+        canonical=f"EP{serial}{kind or EP_KINDS[0]}",
+        espacenet=f"EP{serial}{kind or ''}",
+        candidates=[f"EP{serial}{k}" for k in kinds],
     )
 
 
