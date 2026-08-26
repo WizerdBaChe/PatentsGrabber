@@ -69,6 +69,27 @@ class Store:
         )
         self.conn.commit()
 
+    def patch(self, number: str, updates: dict) -> bool:
+        """Merge extra keys into a stored card WITHOUT restamping fetched_at.
+
+        Enrichment arriving later (EPO drawings, family) is not a re-fetch of the
+        document; moving the timestamp would make the library lie about when the
+        document itself was read.
+        """
+        row = self.conn.execute(
+            "SELECT payload FROM documents WHERE number = ?", (number,)
+        ).fetchone()
+        if not row:
+            return False
+        payload = json.loads(row["payload"])
+        payload.update(updates)
+        self.conn.execute(
+            "UPDATE documents SET payload = ? WHERE number = ?",
+            (json.dumps(payload, ensure_ascii=False), number),
+        )
+        self.conn.commit()
+        return True
+
     def log_lookup(self, query: str, number: str | None, ok: bool, detail: str = "") -> None:
         self.conn.execute(
             "INSERT INTO lookups (query, number, ok, detail, at) VALUES (?, ?, ?, ?, ?)",

@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 from .service import ResolveError, Service
 
@@ -20,8 +20,9 @@ ROOT = Path(__file__).resolve().parents[2]
 WEB = Path(__file__).resolve().parent / "web"
 DB = ROOT / "var" / "library.sqlite3"
 RAW = ROOT / "var" / "raw"
+OPS_CACHE = ROOT / "var" / "ops-cache"
 
-service = Service(DB, raw_dir=RAW)
+service = Service(DB, raw_dir=RAW, cache_dir=OPS_CACHE)
 
 
 @asynccontextmanager
@@ -49,6 +50,44 @@ def api_patent(q: str, refresh: bool = False):
 @app.get("/api/library")
 def api_library():
     return {"count": service.store.count(), "recent": service.store.recent(40)}
+
+
+@app.get("/api/enrich")
+def api_enrich(q: str, refresh: bool = False):
+    """What EPO OPS adds for this document. Costs one OPS call, no page bytes."""
+    return service.enrich(q.strip(), refresh=refresh)
+
+
+@app.get("/api/ops/page")
+def api_ops_page(link: str, page: int = 1):
+    """One EPO drawing sheet, converted to PNG so a browser can show it."""
+    try:
+        png = service.ops_page_png(link, max(1, page))
+    except ResolveError as exc:
+        return JSONResponse(status_code=502, content={"error": str(exc)})
+    # Cached hard: a sheet already paid for against the quota never changes.
+    return Response(png, media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
+@app.get("/api/ops/pdf")
+def api_ops_pdf(link: str, pages: int = 1, name: str = "document"):
+    """The original document, stitched from EPO's per-page PDFs."""
+    try:
+        pdf, included = service.ops_document_pdf(link, max(1, pages))
+    except ResolveError as exc:
+        return JSONResponse(status_code=502, content={"error": str(exc)})
+    safe = "".join(ch for ch in name if ch.isalnum() or ch in "-_") or "document"
+    return Response(pdf, media_type="application/pdf", headers={
+        "Content-Disposition": f'inline; filename="{safe}-EPO-{included}p.pdf"',
+        "X-Pages-Included": str(included),
+    })
+
+
+@app.get("/api/ops/inpadoc")
+def api_ops_inpadoc(q: str):
+    """INPADOC family + legal events. Two OPS calls, so: only when asked for."""
+    return service.ops_inpadoc(q.strip())
 
 
 @app.get("/")

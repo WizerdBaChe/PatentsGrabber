@@ -18,8 +18,10 @@ Nothing here logs or returns the credential; see config.OpsConfig.describe().
 from __future__ import annotations
 
 import base64
+import io
 import re
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -31,6 +33,17 @@ from ..config import OpsConfig, load_ops
 TOKEN_PATH = "/auth/accesstoken"
 REST = "/rest-services"
 REFRESH_MARGIN_S = 60
+
+# OPS bills and throttles per service, and reports the current per-minute
+# allowance for each in x-throttling-control. Mapping a path to its service is
+# what makes those numbers actionable instead of decorative.
+SERVICE_OF_PATH = (
+    ("published-data/images", "images"),
+    ("published-data/search", "search"),
+    ("family/", "inpadoc"),
+    ("legal/", "inpadoc"),
+    ("number-service", "other"),
+)
 
 
 class OpsError(RuntimeError):
@@ -160,12 +173,75 @@ def ops_text(node) -> str:
     return " ".join(t for t in out if t).strip()
 
 
+def service_of(path: str) -> str:
+    for prefix, service in SERVICE_OF_PATH:
+        if path.startswith(prefix):
+            return service
+    return "retrieval"
+
+
+def tiff_to_png(blob: bytes) -> bytes:
+    """OPS serves drawings as TIFF, which no browser renders. Convert, don't crop.
+
+    The sheets are bilevel 300-dpi scans (2550x3300 measured), so the 1-bit mode
+    is kept: it is both smaller than greyscale and exactly what the source is.
+    Resolution is preserved because zooming into a drawing is the point.
+    """
+    try:
+        from PIL import Image
+    except ImportError as exc:  # pragma: no cover - environment-dependent
+        raise OpsError(
+            "無法把 EPO 的 TIFF 圖頁轉成瀏覽器看得懂的格式：缺少 Pillow。"
+            "請安裝：pip install Pillow"
+        ) from exc
+    image = Image.open(io.BytesIO(blob))
+    if getattr(image, "n_frames", 1) > 1:
+        image.seek(0)                      # a multi-page TIFF: this call is one page
+    out = io.BytesIO()
+    image.save(out, format="PNG", optimize=True)
+    return out.getvalue()
+
+
+def merge_pdf_pages(pages: list[bytes]) -> bytes:
+    """OPS returns the original document one page at a time; stitch them back."""
+    try:
+        from pypdf import PdfReader, PdfWriter
+    except ImportError as exc:  # pragma: no cover - environment-dependent
+        raise OpsError(
+            "無法把 EPO 的逐頁 PDF 合併成一份文件：缺少 pypdf。"
+            "請安裝：pip install pypdf（或逐頁下載）"
+        ) from exc
+    writer = PdfWriter()
+    for blob in pages:
+        for page in PdfReader(io.BytesIO(blob)).pages:
+            writer.add_page(page)
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
+@dataclass
+class ImageInstance:
+    """One retrievable rendition of a document, as images-inquiry describes it."""
+
+    desc: str                    # Drawing | FullDocument | FirstPageClipping
+    link: str
+    pages: int
+    formats: list[str] = field(default_factory=list)
+    sections: list[dict] = field(default_factory=list)
+
+    def as_dict(self) -> dict:
+        return {"desc": self.desc, "link": self.link, "pages": self.pages,
+                "formats": self.formats, "sections": self.sections}
+
+
 class OpsClient:
     def __init__(self, cfg: OpsConfig | None = None, timeout: float = 40.0):
         self.cfg = cfg or load_ops()
         self.usage = Usage()
         self._token: str | None = None
         self._expires_at: float = 0.0
+        self._calls: dict[str, deque] = {}
         self._client = httpx.Client(timeout=timeout, follow_redirects=True)
 
     # ------------------------------------------------------------------ auth
@@ -199,10 +275,30 @@ class OpsClient:
 
     # ----------------------------------------------------------------- calls
 
+    def _throttle(self, service: str) -> None:
+        """Stay under the per-minute allowance OPS is currently advertising.
+
+        Sleeping only when the trailing minute is actually full keeps small
+        bursts (a 25-page document) at full speed while a long run still cannot
+        trip the limit. The allowance comes from the service's own header, so a
+        busy OPS automatically slows us down instead of us guessing a number.
+        """
+        allowance = self.usage.allowance(service)
+        if not allowance:
+            return
+        window = self._calls.setdefault(service, deque())
+        now = time.monotonic()
+        while window and now - window[0] > 60:
+            window.popleft()
+        if len(window) >= allowance:
+            time.sleep(max(0.0, 60 - (now - window[0])) + 0.05)
+        window.append(time.monotonic())
+
     def get(self, path: str, *, accept: str = "application/json",
             params: dict[str, Any] | None = None, raw: bool = False) -> Any:
         """GET a rest-services path. `raw` returns the httpx.Response (binary)."""
         url = self.cfg.base_url + REST + ("" if path.startswith("/") else "/") + path
+        self._throttle(service_of(path))
         r = self._client.get(
             url,
             headers={"Authorization": f"Bearer {self.token()}", "Accept": accept},
@@ -264,6 +360,129 @@ class OpsClient:
         accept = "application/pdf" if kind == "pdf" else "image/tiff"
         r = self.get(f"{link}.{kind}", accept=accept, params={"Range": page}, raw=True)
         return r.content
+
+    # -------------------------------------------------- images & original doc
+
+    def instances(self, number: str, fmt: str = "epodoc") -> list[ImageInstance]:
+        """What renditions exist for this document, and how many pages each has.
+
+        Measured shape (2026-08-26): three instances — `Drawing` (the drawing
+        sheets, link `.../thumbnail`), `FirstPageClipping`, and `FullDocument`
+        (the original document, link `.../fullimage`). Drawing and FullDocument
+        offer only application/pdf and application/tiff, which is why a browser
+        cannot be pointed at them directly.
+        """
+        payload = self.images_inquiry(number, fmt=fmt)
+        raw = _walk(payload, "document-instance")
+        found: list[ImageInstance] = []
+        for group in raw:
+            for item in (group if isinstance(group, list) else [group]):
+                if not isinstance(item, dict):
+                    continue
+                link = str(item.get("@link") or "")
+                if not link:
+                    continue
+                sections = []
+                for sec in _walk(item, "document-section"):
+                    for entry in (sec if isinstance(sec, list) else [sec]):
+                        if isinstance(entry, dict) and entry.get("@name"):
+                            sections.append({"name": entry["@name"],
+                                             "start": int(entry.get("@start-page", 1) or 1)})
+                formats = []
+                for group in _walk(item, "document-format"):
+                    for entry in (group if isinstance(group, list) else [group]):
+                        value = entry.get("$") if isinstance(entry, dict) else entry
+                        if isinstance(value, str):
+                            formats.append(value)
+                found.append(ImageInstance(
+                    desc=str(item.get("@desc") or "unknown"),
+                    link=link,
+                    pages=int(item.get("@number-of-pages") or 1),
+                    formats=formats,
+                    sections=sections,
+                ))
+        return found
+
+    def drawing_png(self, link: str, page: int = 1) -> bytes:
+        return tiff_to_png(self.image_page(link, page=page, kind="tiff"))
+
+    def document_pdf(self, link: str, pages: int, *, max_pages: int = 80) -> tuple[bytes, int]:
+        """The original document as one PDF. Returns (bytes, pages_included).
+
+        OPS serves `fullimage` one page per request, so a 25-page patent costs 25
+        calls. The cap is stated rather than silent: a truncated document that
+        claims to be complete is worse than one that says where it stopped.
+        """
+        wanted = min(pages, max_pages)
+        blobs = [self.image_page(link, page=n, kind="pdf") for n in range(1, wanted + 1)]
+        return merge_pdf_pages(blobs), wanted
+
+    # ------------------------------------------------------ INPADOC readings
+
+    @staticmethod
+    def _docdb_id(node) -> dict:
+        """The docdb document-id inside a publication/application reference."""
+        ids = node.get("document-id") if isinstance(node, dict) else None
+        for entry in (ids if isinstance(ids, list) else [ids] if ids else []):
+            if isinstance(entry, dict) and entry.get("@document-id-type") == "docdb":
+                text = lambda key: (entry.get(key) or {}).get("$") if isinstance(entry.get(key), dict) else None
+                return {"country": text("country"), "number": text("doc-number"),
+                        "kind": text("kind"), "date": text("date")}
+        return {}
+
+    def family_members(self, number: str, fmt: str = "epodoc") -> list[dict]:
+        """INPADOC family: every publication of the same invention, worldwide."""
+        payload = self.family(number, fmt=fmt)
+        out: list[dict] = []
+        for group in _walk(payload, "family-member"):
+            for member in (group if isinstance(group, list) else [group]):
+                if not isinstance(member, dict):
+                    continue
+                pub = self._docdb_id(member.get("publication-reference") or {})
+                app = self._docdb_id(member.get("application-reference") or {})
+                if not pub.get("number"):
+                    continue
+                out.append({
+                    "publication": f"{pub.get('country') or ''}{pub['number']}{pub.get('kind') or ''}",
+                    "country": pub.get("country"),
+                    "date": pub.get("date"),
+                    "application": f"{app.get('country') or ''}{app.get('number') or ''}" if app else None,
+                    "family_id": member.get("@family-id"),
+                })
+        return out
+
+    def legal_events(self, number: str, fmt: str = "epodoc") -> list[dict]:
+        """INPADOC legal events for this publication, newest first where dated."""
+        payload = self.legal(number, fmt=fmt)
+        out: list[dict] = []
+        for group in _walk(payload, "legal"):
+            for event in (group if isinstance(group, list) else [group]):
+                if not isinstance(event, dict) or "@code" not in event:
+                    continue
+                date = None
+                detail = []
+                for key, value in event.items():
+                    if not isinstance(value, dict):
+                        continue
+                    label = value.get("@desc") or ""
+                    if label == "Gazette DATE":
+                        date = value.get("$")
+                    elif "$" in value and label and label not in ("Country Code", "Kind Code",
+                                                                  "Document Number", "IPR Type",
+                                                                  "Filing / Published Document"):
+                        detail.append(f"{label}: {value['$']}")
+                    else:
+                        for sub in value.values():        # nested L5xx blocks
+                            if isinstance(sub, dict) and sub.get("@desc") and "$" in sub:
+                                detail.append(f"{sub['@desc']}: {sub['$']}")
+                out.append({
+                    "date": date,
+                    "code": str(event.get("@code") or "").strip(),
+                    "title": str(event.get("@desc") or "").strip(),
+                    "detail": " · ".join(dict.fromkeys(detail))[:400],
+                })
+        out.sort(key=lambda e: e["date"] or "", reverse=True)
+        return out
 
     def number_convert(self, number: str, *, from_fmt: str = "epodoc",
                        to_fmt: str = "docdb", kind: str = "publication") -> dict:
