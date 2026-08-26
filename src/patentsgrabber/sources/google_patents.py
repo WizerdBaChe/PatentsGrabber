@@ -14,13 +14,14 @@ report can distinguish "the page does not have this" from "our parser missed it"
 
 from __future__ import annotations
 
+import html as html_mod
 import re
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import httpx
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString, Tag
 
 BASE = "https://patents.google.com/patent/{number}/{lang}"
 
@@ -287,8 +288,25 @@ def _events(soup: BeautifulSoup) -> tuple[list[dict], str | None]:
 _DEPENDS_RE = re.compile(r"\b(?:of|in|to|according to)\s+claims?\s+\d+", re.IGNORECASE)
 
 
+def _claim_parts(el, depth: int = 1) -> list[dict]:
+    """The limitations of one claim, in order, carrying their nesting depth.
+
+    A US claim is one sentence that can run 300 words; the markup already breaks
+    it at every limitation (`div.claim-text` nested inside the preamble's own
+    `div.claim-text`). Reading it as a tree is the difference between parsing a
+    claim and merely looking at it.
+    """
+    out: list[dict] = []
+    for child in el.find_all("div", class_="claim-text", recursive=False):
+        text, rich = _inline(child)
+        if text:
+            out.append({"depth": depth, "text": text, "rich": rich})
+        out.extend(_claim_parts(child, depth + 1))
+    return out
+
+
 def _claim_list(soup: BeautifulSoup) -> tuple[list[dict], str | None]:
-    """Individual claims with independent/dependent marking.
+    """Individual claims with independent/dependent marking and their limitations.
 
     Independent claims carry the actual scope of the patent, so the reader needs
     them separated out rather than buried in one wall of text.
@@ -301,12 +319,32 @@ def _claim_list(soup: BeautifulSoup) -> tuple[list[dict], str | None]:
         num = div.get("num")
         if not num:
             continue  # outer wrapper, not a claim
-        text = div.get_text(" ", strip=True)
-        body = re.sub(r"^\s*\d+\s*\.\s*", "", text)
-        dependent = bool(_DEPENDS_RE.search(body)) or bool(
+        flat = div.get_text(" ", strip=True)
+        body = re.sub(r"^\s*\d+\s*\.\s*", "", flat)
+        refs = sorted({(r.get("idref") or "").replace("CLM-", "").lstrip("0")
+                       for r in div.find_all("claim-ref")} - {""}, key=lambda s: int(s) if s.isdigit() else 0)
+        dependent = bool(refs) or bool(_DEPENDS_RE.search(body)) or bool(
             div.find(class_="claim-dependent") or "claim-dependent" in (div.parent.get("class") or [])
         )
-        out.append({"num": num.lstrip("0") or num, "text": text, "dependent": dependent})
+        top = div.find("div", class_="claim-text", recursive=False)
+        if top is not None:
+            lead, lead_rich = _inline(top)
+            parts = _claim_parts(top, 1)
+        else:                                   # older markup: no claim-text at all
+            lead, lead_rich = _inline(div)
+            parts = []
+        # `text` is what the user copies. Rebuilding it from the structured pieces
+        # avoids the artefacts a flat get_text leaves behind ("2 . The tool of
+        # claim 1 , wherein"), which come from the markup's own <b>2</b> spans.
+        out.append({
+            "num": num.lstrip("0") or num,
+            "text": "\n".join([lead] + [p["text"] for p in parts]) if parts else (lead or flat),
+            "dependent": dependent,
+            "lead": lead,
+            "lead_rich": lead_rich,
+            "parts": parts,
+            "refs": refs,
+        })
     return out, ('section[itemprop="claims"] div.claim[num]' if out else None)
 
 
@@ -314,6 +352,210 @@ def _people(soup: BeautifulSoup, prop: str) -> tuple[list[str], str | None]:
     els = soup.find_all("dd", attrs={"itemprop": prop})
     vals = [e.get_text(" ", strip=True) for e in els if e.get_text(strip=True)]
     return vals, (f'dd[itemprop="{prop}"]' if vals else None)
+
+
+# --------------------------------------------------------------------------- #
+# structure — recovering what a flat get_text() throws away
+#
+# Google Patents publishes the specification as real structure: headings, one
+# element per paragraph (with its [0042] number), semantic `figref` for every
+# "FIG. 3" mention, `figure-callout` for reference numerals, and claims already
+# broken into nested limitations. Rendering that as one flattened run of text is
+# the single biggest readability loss in Stage 0, and it is self-inflicted:
+# `get_text(" ")` discards a structure the source went to the trouble of marking.
+#
+# Two markup vintages exist and both must be handled (measured over the 12 pages
+# in var/raw/, 2026-08-26):
+#   grants / older docs   div.description  > div.description-paragraph   (no numbers)
+#   newer publications    ul.description   > li > para-num + div.description-line
+# --------------------------------------------------------------------------- #
+
+# Inline tags worth keeping: chemistry and math depend on sub/sup, and losing
+# them changes meaning (H2O vs H₂O). Everything else is unwrapped to plain text.
+_INLINE_KEEP = {"sub", "sup", "i", "b", "em", "strong"}
+_PARA_CLASSES = ("description-paragraph", "description-line")
+_FIG_NUM_RE = re.compile(r"(\d+)\s*([A-Za-z])?")
+
+
+def _is_claim_part(node) -> bool:
+    return isinstance(node, Tag) and node.name == "div" and "claim-text" in (node.get("class") or [])
+
+
+def _fig_number(text: str) -> str | None:
+    """'FIG. 3A' -> '3A'. Returns None when no number is present."""
+    m = _FIG_NUM_RE.search(text)
+    if not m:
+        return None
+    return m.group(1) + (m.group(2).upper() if m.group(2) else "")
+
+
+def _wrap(rich: str, open_tag: str, close_tag: str) -> str:
+    """Wrap inline content in a tag while leaving its edge whitespace outside it.
+
+    `<figref>FIG. <b>1</b> </figref>` carries the separating space INSIDE the
+    element; wrapping it as-is underlines a trailing blank, and stripping it
+    outright welds the next word on. Moving the whitespace out keeps both right.
+    """
+    inner = rich.strip()
+    if not inner:
+        return rich
+    lead = rich[: len(rich) - len(rich.lstrip())]
+    trail = rich[len(rich.rstrip()):]
+    return f"{lead}{open_tag}{inner}{close_tag}{trail}"
+
+
+def _inline_raw(node) -> tuple[str, str]:
+    """(plain, rich) for one element's inline content, whitespace untouched.
+
+    Whitespace is normalized only by the caller: collapsing at every recursion
+    level eats the single space that separates a word from the tag next to it.
+    """
+    plain: list[str] = []
+    rich: list[str] = []
+    for child in node.children:
+        if isinstance(child, NavigableString):
+            text = str(child)
+            plain.append(text)
+            rich.append(html_mod.escape(text))
+            continue
+        if not isinstance(child, Tag):
+            continue
+        if _is_claim_part(child):
+            continue  # a nested limitation is its own block, not part of this one
+        name = child.name.lower()
+        p, r = _inline_raw(child)
+        if name == "figref":
+            num = _fig_number(p)
+            plain.append(p)
+            rich.append(_wrap(r, f'<a class="figref" data-fig="{html_mod.escape(num)}">', "</a>")
+                        if num else r)
+        elif name == "claim-ref":
+            ref = (child.get("idref") or "").replace("CLM-", "").lstrip("0")
+            plain.append(p)
+            rich.append(_wrap(r, f'<a class="claimref" data-claim="{html_mod.escape(ref)}">', "</a>")
+                        if ref else r)
+        elif name == "figure-callout":
+            plain.append(p)
+            rich.append(_wrap(r, '<span class="numeral">', "</span>"))
+        elif name in _INLINE_KEEP:
+            plain.append(p)
+            rich.append(_wrap(r, f"<{name}>", f"</{name}>"))
+        elif name == "br":
+            plain.append(" ")
+            rich.append(" ")
+        else:
+            plain.append(p)
+            rich.append(r)
+    return "".join(plain), "".join(rich)
+
+
+def _inline(node) -> tuple[str, str]:
+    """Normalized (plain, rich) for one block element."""
+    p, r = _inline_raw(node)
+    return re.sub(r"\s+", " ", p).strip(), re.sub(r"\s+", " ", r).strip()
+
+
+def _figs_in(node) -> list[str]:
+    out = []
+    for fr in node.find_all("figref"):
+        num = _fig_number(fr.get_text(" ", strip=True))
+        if num and num not in out:
+            out.append(num)
+    return out
+
+
+def _para_number(el) -> str | None:
+    """The [0042] paragraph number, from the div itself or its para-num sibling."""
+    num = (el.get("num") or "").strip()
+    if not num:
+        sib = el.find_previous_sibling("para-num")
+        num = ((sib.get("num") if sib else "") or "").strip() if sib else ""
+    num = num.strip("[]").strip()
+    return num.lstrip("0") or num if num else None
+
+
+def _block_kind(el) -> str | None:
+    """Which kind of block this element carries, if any."""
+    if not isinstance(el, Tag):
+        return None
+    name = el.name.lower()
+    if name == "heading":
+        return "heading"
+    if name == "div" and any(c in (el.get("class") or []) for c in _PARA_CLASSES):
+        return "para"
+    if name in ("pre", "table"):
+        return "pre"
+    if name == "li":
+        # Enumerated limitations and feature lists appear as bare <li> in some
+        # documents and as <li><para-num/><div class="description-line"/></li> in
+        # others; only the former is a block in its own right.
+        return "li"
+    return None
+
+
+def _ancestor_kinds(el, root) -> set[str]:
+    kinds, node = set(), el.parent
+    while node is not None and node is not root:
+        kind = _block_kind(node)
+        if kind:
+            kinds.add(kind)
+        node = node.parent
+    return kinds
+
+
+def _description_blocks(soup: BeautifulSoup) -> tuple[list[dict], str | None]:
+    """The specification as ordered blocks: headings, numbered paragraphs, lists, tables."""
+    section = soup.find("section", attrs={"itemprop": "description"})
+    if not section:
+        return [], None
+    root = section.find(class_="description") or section
+
+    blocks: list[dict] = []
+    for el in root.find_all(["heading", "div", "pre", "table", "li"]):
+        kind = _block_kind(el)
+        if not kind:
+            continue
+        ancestors = _ancestor_kinds(el, root)
+        # Content already carried by an enclosing block must not be emitted twice.
+        if kind == "para" and "para" in ancestors:
+            continue
+        if kind in ("pre", "heading") and ({"para", "li"} & ancestors):
+            continue
+        if kind == "li":
+            if "para" in ancestors:
+                continue          # the enclosing paragraph already carries this text
+            if el.find("li") or el.find("div", class_=list(_PARA_CLASSES)):
+                continue          # a wrapper around other blocks, not a list item itself
+
+        if kind == "pre":
+            # Preformatted data and tables carry their meaning in their layout;
+            # collapsing them into prose destroys it. Kept verbatim, rendered mono.
+            text = el.get_text("\n", strip=True) if el.name == "table" else el.get_text()
+            if text.strip():
+                blocks.append({"type": "pre", "text": text.rstrip()})
+            continue
+
+        text, rich = _inline(el)
+        if not text:
+            continue
+        if kind == "heading":
+            blocks.append({"type": "heading", "text": text, "rich": rich, "id": el.get("id")})
+        elif kind == "para":
+            blocks.append({"type": "para", "num": _para_number(el), "text": text,
+                           "rich": rich, "figs": _figs_in(el)})
+        else:
+            depth = 0
+            node = el.parent
+            while node is not None and node is not root:
+                if isinstance(node, Tag) and node.name in ("ul", "ol"):
+                    depth += 1
+                node = node.parent
+            blocks.append({"type": "li", "level": max(1, depth), "text": text,
+                           "rich": rich, "figs": _figs_in(el)})
+
+    if not blocks:
+        return [], None
+    return blocks, 'section[itemprop="description"] heading|.description-paragraph|.description-line|li'
 
 
 # --------------------------------------------------------------------------- #
@@ -345,6 +587,7 @@ def parse(html: str, number: str, url: str, status: int, raw_path: Path | None) 
     put("title", first(_meta_name(soup, "DC.title"), _meta_name(soup, "citation_title")))
     put("abstract", first(_section_text(soup, "abstract", "section"), _meta_name(soup, "DC.description")))
     put("description", _section_text(soup, "description", "section"))
+    put("description_blocks", _description_blocks(soup))
     put("claims", _section_text(soup, "claims", "section"))
     put("claim_list", _claim_list(soup))
     put("pdf_link", first(_meta_name(soup, "citation_pdf_url"), _meta_itemprop(soup, "pdfLink")))
