@@ -36,6 +36,15 @@ HEADERS = {
 
 MIN_DESCRIPTION_CHARS = 500  # below this, treat description as "stub, not real text"
 
+# Version of the reading-structure extraction (blocks + claim tree). A stored
+# card carries the version it was built with, so improving the extractor
+# re-derives every library entry from the raw page instead of leaving old cards
+# rendering with an old parser forever. BUMP THIS whenever _description_blocks
+# or _claim_list changes what it produces.
+#   1  blocks + nested claim limitations
+#   2  flat claim limitations (siblings of the preamble) also collected
+READING_SCHEMA = 2
+
 
 class FetchError(RuntimeError):
     """The document could not be retrieved (network, HTTP status, or not found)."""
@@ -326,13 +335,23 @@ def _claim_list(soup: BeautifulSoup) -> tuple[list[dict], str | None]:
         dependent = bool(refs) or bool(_DEPENDS_RE.search(body)) or bool(
             div.find(class_="claim-dependent") or "claim-dependent" in (div.parent.get("class") or [])
         )
-        top = div.find("div", class_="claim-text", recursive=False)
-        if top is not None:
-            lead, lead_rich = _inline(top)
-            parts = _claim_parts(top, 1)
+        # Two shapes exist and both are common (measured over var/raw/):
+        #   nested — limitations live INSIDE the preamble's claim-text
+        #   flat   — limitations are SIBLINGS of the preamble's claim-text
+        # Handling only the nested one silently renders a claim as its preamble,
+        # which reads as a complete claim and is therefore worse than an error.
+        kids = div.find_all("div", class_="claim-text", recursive=False)
+        parts: list[dict] = []
+        if kids:
+            lead, lead_rich = _inline(kids[0])
+            parts.extend(_claim_parts(kids[0], 1))
+            for sibling in kids[1:]:
+                text, rich = _inline(sibling)
+                if text:
+                    parts.append({"depth": 1, "text": text, "rich": rich})
+                parts.extend(_claim_parts(sibling, 2))
         else:                                   # older markup: no claim-text at all
             lead, lead_rich = _inline(div)
-            parts = []
         # `text` is what the user copies. Rebuilding it from the structured pieces
         # avoids the artefacts a flat get_text leaves behind ("2 . The tool of
         # claim 1 , wherein"), which come from the markup's own <b>2</b> spans.

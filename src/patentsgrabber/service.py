@@ -259,13 +259,17 @@ class Service:
     # ------------------------------------------------------------------ #
 
     def _upgrade(self, number: str, card: dict) -> dict:
-        """Re-derive reading structure for cards stored before it existed.
+        """Re-derive reading structure whenever the extractor is newer than the card.
 
         The raw page is already on disk, so this costs no network and no quota.
-        Without it, every document read before this upgrade keeps rendering as
-        flat text forever — which looks exactly like the feature not working.
+        Without it a library entry keeps whatever the parser produced on the day
+        it was read — which, after a parser fix, looks exactly like the fix not
+        working. The stored schema version is what makes this automatic instead
+        of something someone has to remember.
         """
-        if card.get("description_blocks") or not self.raw_dir:
+        if not self.raw_dir:
+            return card
+        if card.get("_reading_schema") == gp.READING_SCHEMA:
             return card
         raw = self.raw_dir / f"{number}.html"
         if not raw.exists():
@@ -277,12 +281,14 @@ class Service:
             return card
         blocks = doc.fields["description_blocks"].value or []
         claims = doc.fields["claim_list"].value or []
-        if not blocks and not claims:
-            return card
+        # Even an empty result is recorded: a document that genuinely has no
+        # description (a reexamination certificate) must not be re-parsed on
+        # every single read.
         updates = {
             "description_blocks": blocks,
             "claims": claims,
             "independent_claims": [c["num"] for c in claims if not c["dependent"]],
+            "_reading_schema": gp.READING_SCHEMA,
             "_upgraded_from_raw": True,
         }
         self.store.patch(number, updates)
@@ -381,6 +387,7 @@ class Service:
                 "patentscope": f"https://patentscope.wipo.int/search/en/result.jsf?query={doc.number}",
             },
             "ops": None,          # filled by enrich(), on demand, from EPO OPS
+            "_reading_schema": gp.READING_SCHEMA,
             "_from_store": False,
         }
 

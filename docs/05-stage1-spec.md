@@ -34,7 +34,7 @@ Boundaries that touch this round (CIM §4): **no public deployment** — after O
 | **F-4** | A `…/thumbnail` TIFF page is a **full sheet at ~300 dpi** (2550×3300, mode `1` bilevel, 27.5 KB), decodable by Pillow and convertible to PNG (~48 KB) | measured 2026-08-26, same probe |
 | **F-5** | Google Patents description markup has **two vintages**: `div.description` + `div.description-paragraph` (grants/older) and `ul.description` + `li > para-num[num="[0001]"] + div.description-line` (newer publications). Both use `<heading>` for section titles and `<description-of-drawings>` as a wrapper | 12 saved pages in `var/raw/`, measured 2026-08-26 |
 | **F-6** | Figure references are **already semantic**: `<figref idrefs="DRAWINGS">FIG. <b>3</b></figref>` — 0 in pre-2000 documents, 9–1074 in modern ones. Reference numerals are marked as `<figure-callout>` | same sweep |
-| **F-7** | Claims are **already segmented in the markup**: `div.claim > div.claim-text` (preamble) with **nested** `div.claim-text` per limitation, plus `<claim-ref idref="CLM-00001">` cross-references. The Stage 0 parser flattens all of it with `get_text(" ")` | same sweep |
+| **F-7** | Claims are **already segmented in the markup**, in **two shapes**: limitations nested inside the preamble's `div.claim-text` (`US20250383260A1`, `US5960411A`, `US4237224A`, `US8046721B2`) **or** as siblings of it (`US6285999B1`). Plus `<claim-ref idref="CLM-00001">` cross-references. The Stage 0 parser flattens all of it with `get_text(" ")` | same sweep; the sibling shape was found by eye on a screenshot after the nested-only parser rendered a claim as its preamble alone — which is why claim coverage is now measured, not just description coverage |
 | **F-8** | Quota is metered by OPS's own headers (`x-registeredquotaperweek-used`, `x-throttling-control`), bucketed by GMT week. Observed 2026-08-26: system state `overloaded` → images 50/min, search 5/min | `epo_ops.Usage`, live headers |
 
 > F-5/F-6/F-7 are the mechanical basis for §4. The reading optimizations below are **not** heuristics layered on flat text — they recover structure the source already publishes and Stage 0 discarded.
@@ -86,7 +86,8 @@ Machine-checkable:
 
 | Check | Result |
 |---|---|
-| `tools/check_reading.py` | **12/12 documents pass**, text coverage 0.992–1.000; figure-reference controls pass in both directions; calibration page (paragraph markup removed) correctly **fails** at 0.007 |
+| `tools/check_reading.py` | **12/12 documents pass**, description coverage 0.992–1.000, **claim coverage 1.000**; figure-reference controls pass in both directions; calibration page (paragraph markup removed) correctly **fails** at 0.007 |
+| Claim-coverage metric, calibrated against the defect it was written for | replaying the pre-fix parser on `US6285999B1` (limitations are siblings, not nested) reads **0.282** and would fail the gate; the fixed parser reads 1.000. The nested-markup document reads 1.000 under both, so the metric does not cry wolf |
 | `tools/verify_ops.py` | **14/14** (was 11/14 at the last record; the three former reds are now asserted as expected outcomes) |
 | `tools/smoke_service.py` | **ALL PASS** |
 | `tests/test_ops_number_formats.py` | **ALL PASS** |

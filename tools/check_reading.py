@@ -67,6 +67,22 @@ def analyse(path: Path) -> dict | None:
     got = norm(" ".join(b.get("text", "") for b in blocks))
     claims = doc.fields["claim_list"].value or []
 
+    # Claims get their own coverage number. Measuring only the description let a
+    # real defect through once: claims whose limitations are SIBLINGS of the
+    # preamble rendered as the preamble alone — which looks like a short claim,
+    # not like a failure. Whitespace is removed on both sides because the flat
+    # text carries spacing artefacts from the markup's own <b>2</b> spans.
+    claim_ref = claim_got = 0
+    soup = BeautifulSoup(html, "lxml")
+    section = soup.find("section", attrs={"itemprop": "claims"})
+    if section:
+        for div in section.find_all("div", class_="claim"):
+            if div.get("num"):
+                claim_ref += len(re.sub(r"\s+", "", div.get_text(" ", strip=True)))
+    for c in claims:
+        pieces = [c.get("lead") or ""] + [p.get("text", "") for p in (c.get("parts") or [])]
+        claim_got += len(re.sub(r"\s+", "", " ".join(pieces)))
+
     return {
         "number": number,
         "blocks": len(blocks),
@@ -77,6 +93,7 @@ def analyse(path: Path) -> dict | None:
         "figrefs": sum(len(b.get("figs") or []) for b in blocks),
         "claims": len(claims),
         "claim_parts": sum(len(c.get("parts") or []) for c in claims),
+        "claim_cover": (claim_got / claim_ref) if claim_ref else 1.0,
         "ref_chars": len(ref),
         "got_chars": len(got),
         "coverage": (len(got) / len(ref)) if ref else (1.0 if not blocks else 0.0),
@@ -94,6 +111,8 @@ def verdict(r: dict) -> tuple[bool, str]:
         return False, f"{r['empty_blocks']} empty block(s)"
     if not (COVERAGE_MIN <= r["coverage"] <= COVERAGE_MAX):
         return False, f"text coverage {r['coverage']:.3f} outside [{COVERAGE_MIN}, {COVERAGE_MAX}]"
+    if r["claims"] and not (COVERAGE_MIN <= r["claim_cover"] <= COVERAGE_MAX):
+        return False, f"claim coverage {r['claim_cover']:.3f} — limitations are being dropped"
     return True, ""
 
 
@@ -105,8 +124,8 @@ def main() -> int:
 
     rows, failures = [], []
     print(f"{'document':<22}{'blocks':>7}{'head':>6}{'para':>6}{'#num':>6}{'pre':>5}"
-          f"{'figs':>6}{'clm':>5}{'parts':>6}{'cover':>8}  verdict")
-    print("-" * 92)
+          f"{'figs':>6}{'clm':>5}{'parts':>6}{'cover':>8}{'clmcov':>8}  verdict")
+    print("-" * 100)
     for path in files:
         r = analyse(path)
         if r is None:
@@ -118,7 +137,8 @@ def main() -> int:
             failures.append((r["number"], why))
         print(f"{r['number']:<22}{r['blocks']:>7}{r['headings']:>6}{r['paras']:>6}"
               f"{r['numbered']:>6}{r['pre']:>5}{r['figrefs']:>6}{r['claims']:>5}"
-              f"{r['claim_parts']:>6}{r['coverage']:>8.3f}  {'ok' if ok else 'FAIL: ' + why}")
+              f"{r['claim_parts']:>6}{r['coverage']:>8.3f}{r['claim_cover']:>8.3f}"
+              f"  {'ok' if ok else 'FAIL: ' + why}")
 
     # ---- systematic-failure detection (Stage 0 lesson: all-zero means the tool broke)
     print()
