@@ -1,6 +1,6 @@
 # Stage 1 — Working Spec (rules, requirements, work breakdown)
 
-- Date: 2026-08-26 · Status: **in build**
+- Date: 2026-08-26 · Status: **delivered 2026-08-27** — every unit in §3 is built except S1-E, which stays deliberately partial (§3). All gates re-run green on the merge commit; see §5.5.
 - Upstream: `docs/01-concept-note.md` (CIM, rules) · `docs/02-stage0-findings.md` (Stage 0 measurements) · `docs/04-ops-verification-results.md` (OPS capability evidence)
 - This file invents no new rules. It restates the binding ones next to the code they constrain, pins the facts that are already settled by measurement, and slices Stage 1 into buildable units.
 - Primary consumer: the session that builds Stage 1. Sections the user rules on are in Traditional Chinese (§6).
@@ -58,13 +58,15 @@ Boundaries that touch this round (CIM §4): **no public deployment** — after O
 | ID | Unit | This round | Rationale |
 |---|---|---|---|
 | **S1-A** | OPS drawings + original document PDF, filling the two Stage 0 holes | **YES** | `docs/04` §1 calls this "the entire reason for connecting OPS". It repairs the user's own example document |
-| **S1-B** | INPADOC family + legal events from OPS (richer than the Google table) | **YES, on demand** | One extra call, only when the user opens the panel |
+| **S1-B** | INPADOC family + legal events from OPS (richer than the Google table) | **DONE, on demand** (`/api/ops/inpadoc`, two calls, only when the chip is opened) | One extra call, only when the user opens the panel |
 | **S1-C** | Applicant / company CQL search + result list + BR-8 name variants | **YES** (2026-08-26, second round) | Built after the reading work landed; brought its own discovery, F-13, which forced the OPS-only card below |
 | **S1-C′** | **OPS-only card**: when Google Patents does not have a document, build the card from OPS biblio (title, applicants, inventors, dates, CPC, abstract) with the full text declared absent and the reasons stated | **YES**, forced by F-13 | Without it the first page of every company search dead-ends in "查不到" while the document sits in OPS. Provisional by construction: it is re-tried against Google on the next read |
 | **S1-D** | EP jurisdiction (EP number parsing, EP text, EP search scope) | **YES** (2026-08-26, fourth round) | Turned out to be mostly parser work, not a second pipeline: Google Patents carries EP full text, and OPS covers EP where Google does not |
 | **S1-E** | Number normalization through OPS number-service | partial (already the last-resort path in `OpsClient.resolve`) | Promoting it to primary costs a call per lookup for no measured gain |
 
 **Degradation order if the round runs short**: drop S1-B → drop reference-numeral highlighting (§4 R-7) → drop the EPO high-resolution opt-in for documents whose Google images already work. **Guaranteed core**: S1-A for documents where Google has no usable drawings/PDF, plus §4 R-1…R-5.
+
+**Nothing was degraded.** The order above was never invoked: S1-B shipped on demand and R-7 shipped as a default-off control (`#c-numeral`, `READ_DEFAULTS.numerals = false`). R-1…R-10 are all in the reading pane. The only unit left partial is S1-E, and that is a measured decision, not a shortfall — promoting the OPS number service to the primary path costs one call per lookup for no gain the candidate list does not already deliver (F-14).
 
 ---
 
@@ -172,6 +174,25 @@ Human-eye (must be confirmed in the real browser; see the delivery checklist):
 | Search scope | `pn=EP` → 75,230 Siemens EP publications, all EP; `(pn=US OR pn=EP)` → 105,554 mixed. Four scope chips replace the US-only checkbox |
 | BR-8 across subsidiaries | Siemens EP page 1 exposes SIEMENS AG [DE] 17, SIEMENS MOBILITY 8, SIEMENS HEALTHINEERS 6, SIEMENS GAMESA [DK] 5, SIEMENS RAIL AUTOMATION [ES] 3 — the corporate group, spelled out |
 
+### 5.5 Close-out re-run (2026-08-27, whole branch, before merging to `main`)
+
+Every gate re-run from a clean tree at `f846c40`, so the numbers below describe the code that is now on `main` — not four separate rounds each measured on its own tip.
+
+| Gate | Result | Note |
+|---|---|---|
+| `tools/check_reading.py` | **20/20 documents pass** | description coverage 0.992–1.000, claim coverage 1.000; figure-reference controls pass both ways; the calibration page still correctly **fails** at 0.007 |
+| `tools/verify_ops.py` | **14/14** | US full text still `CLIENT.InvalidCountryCode` (F-1 holds); EP control 10,537 chars |
+| `tools/check_search.py` | **20/20** | injection, truncation, BR-8 variants, zero-result answer, BR-1 dispatch, EN/DE/FR dependency, EP/US scopes |
+| `tests/test_ops_number_formats.py` | **ALL PASS** (7 cases) | both serial widths still offered (F-14) |
+| `tools/smoke_service.py` | **ALL PASS** | fetch → store → re-serve from the library; application number, nonexistent number and garbage each explained rather than crashed |
+| OPS quota consumed by this close-out | 19 requests, 0.80 MB (GMT week 2026-W35) | EPO's own weekly counter read 12.4 MB afterwards; no threshold assumed (BR-6/F-8) |
+
+`pytest` is **not** installed on this machine; `tests/test_ops_number_formats.py` runs as a script and prints its own results. That is the intended interface — the gates are runnable programs, not a framework.
+
+**Not re-verified in this pass, by nature**: the human-eye items (§5 items 5–7) and the wide-screen layout numbers in §5.2. They were confirmed in the browser during their own rounds and no code touching layout or reading defaults has changed since; a real window drag remains a human check (R-10 instrument note).
+
+---
+
 ## 6. 本輪範圍決定與待裁決事項
 
 **本輪做**：S1-A（EPO 圖式與原文件 PDF）＋ S1-B（INPADOC 同族／法律事件，隨點隨取）＋ §4 的閱讀優化 R-1…R-6。
@@ -182,11 +203,18 @@ Human-eye (must be confirmed in the real browser; see the delivery checklist):
 - **S1-D EP 管轄**：`numbers.py` 目前是 US-only 的結構，EP 要自己的號碼正規化與卡片路徑。
 - **R-7 引用元件編號高亮**：預設關閉的加值功能，排在降級順序第二位。
 
-**待你裁決**：
+**上列「本輪不做」後來全部補做完**：S1-C 在第三輪、S1-D 在第四輪、R-7 隨閱讀面板一起出。這段保留原文不改寫，因為它記錄的是當時的判斷，而那個判斷（分輪做、不混做）本身是對的。
 
-1. 下一輪先做 S1-C（公司名檢索）還是 S1-D（EP 管轄）？
-2. 圖式預設來源：Google 有圖時就用 Google（省配額、載入快），EPO 高解析設為選項——這是目前的實作選擇。若你希望**一律用 EPO 300 dpi**，說一聲即可改預設。
-3. 是否要把 `ops-relaxation: L1` 寫進專案的 `CLAUDE.md`（目前此專案沒有這個檔）。
+**裁決結果（2026-08-27 結案）**：
+
+1. **兩個都做了**，而且順序是先 S1-C 再 S1-D。事後看順序有意義：S1-C 撞出 F-13（Google Patents 落後 OPS 數月），逼出 S1-C′ 純 OPS 卡片；S1-D 因此只是解析器工作，不必再長第二條管線。
+2. **圖式預設來源維持現狀**：Google 有圖就用 Google，EPO 300 dpi 是選項。未改預設。
+3. **`ops-relaxation: L1` 已寫進專案 `CLAUDE.md`**，該檔現在也承載其他每次變更都要遵守的規則（不得靜默等待、不得靜默留空、僅限本機使用、schema 常數與擷取器同一次 commit 一起改）。
+
+**下一輪之前仍未裁決的**（不阻擋結案）：
+
+1. Stage 2 從哪裡起手——CIM 裡的分階規劃已經有清單，但沒有排序。
+2. S1-E 是否永遠留在最後備援位置。目前的理由是「量過、沒有好處」（見 §3），若 OPS 之後改變號碼服務的成本結構，這條要重讀。
 
 ---
 
