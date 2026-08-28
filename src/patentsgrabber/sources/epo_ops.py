@@ -510,9 +510,9 @@ class OpsClient:
                            None, str(exc)[:200]) from exc
         if r.status_code in (400, 401, 403):
             raise OpsAuthError(
-                "OPS 拒絕這組金鑰。請確認 .env 裡的 OPS_CONSUMER_KEY / "
-                "OPS_CONSUMER_SECRET 與 EPO Developer Portal 上該 app 的值一致，"
-                "且該 app 已啟用（新建的 app 有時要等幾分鐘才生效）。",
+                "OPS 拒絕這組金鑰。請在「設定」裡確認 Consumer Key / Consumer Secret "
+                "與 EPO Developer Portal 上該 app 的值一致，且該 app 已啟用"
+                "（新建的 app 有時要等幾分鐘才生效）。",
                 r.status_code, r.text[:400],
             )
         if r.status_code != 200:

@@ -143,6 +143,7 @@ class Service:
         self.client = httpx.Client(headers=gp.HEADERS, timeout=30.0, follow_redirects=True)
         self._ops: ops.OpsClient | None = None
         self._ops_reason: str | None = None
+        self._retired: list[ops.OpsClient] = []      # see reset_ops()
 
     # --------------------------------------------------------------- EPO OPS
 
@@ -158,12 +159,34 @@ class Service:
                 self._ops = ops.OpsClient()
             except MissingCredentials:
                 self._ops_reason = (
-                    "尚未設定 EPO OPS 金鑰。把 Consumer Key / Secret 填進 .env 後重開即可"
-                    "取得高解析圖式與原文件 PDF（設定步驟見 README）。"
+                    "尚未設定 EPO OPS 金鑰。按右上角「設定」填入 Consumer Key / Secret，"
+                    "即可取得高解析圖式、原文件 PDF 與申請人檢索。金鑰在 EPO Developer "
+                    "Portal 免費申請。"
                 )
             except Exception as exc:                       # defensive: never break a lookup
                 self._ops_reason = f"EPO OPS 無法初始化：{exc}"
         return self._ops
+
+    def reset_ops(self) -> None:
+        """Forget the OPS client so the next call rebuilds it from current config.
+
+        Saving a credential in the settings panel has to take effect without a
+        restart, and the client caches both the configuration and an access
+        token minted from it.
+
+        The old client is RETIRED, not closed. FastAPI runs these endpoints in a
+        threadpool, so a drawing sheet can be in flight on the old client while
+        the save happens on this one; closing its httpx client underneath that
+        request turns a successful fetch into "Cannot send a request, as the
+        client has been closed" — a confusing 502 caused by an unrelated save.
+        Retired clients are closed together in `close()`. A settings save happens
+        a handful of times in a session, so the pooled sockets they hold until
+        then are not a leak worth that failure mode.
+        """
+        old, self._ops = self._ops, None
+        self._ops_reason = None
+        if old is not None:
+            self._retired.append(old)
 
     def _cache_path(self, link: str, filename: str) -> Path | None:
         if not self.cache_dir or not OPS_LINK_RE.match(link):
@@ -216,23 +239,45 @@ class Service:
         self.store.patch(number, {"ops": payload})
         return payload
 
-    def ops_page_png(self, link: str, page: int) -> bytes:
-        """One drawing sheet as PNG, from disk if we already paid for it."""
+    def ops_page_png(self, link: str, page: int) -> tuple[bytes, bool]:
+        """One drawing sheet as PNG. Returns (png, came_from_cache).
+
+        The second half of the pair exists so the reader can be told which
+        sheets are already paid for. OPS serves one page per request — that is
+        the source's shape, not a slow implementation — and a page strip that
+        distinguishes "on disk" from "will cost a request" turns an unexplained
+        wait into a visible price.
+        """
         if not OPS_LINK_RE.match(link):
             raise ResolveError("不合法的 EPO 影像位址。")
+        cached = self._cache_path(link, f"p{page:04d}.png")
+        if cached and cached.exists():
+            return cached.read_bytes(), True
         client = self.ops_client()
         if client is None:
             raise ResolveError(self._ops_reason or "EPO OPS 不可用。")
-        cached = self._cache_path(link, f"p{page:04d}.png")
-        if cached and cached.exists():
-            return cached.read_bytes()
         try:
             png = client.drawing_png(link, page)
         except ops.OpsError as exc:
             raise ResolveError(f"EPO OPS 取不到第 {page} 頁（{_fault(exc)}）。") from exc
         if cached:
             cached.write_bytes(png)
-        return png
+        return png, False
+
+    def ops_cached_pages(self, link: str) -> list[int]:
+        """Sheet numbers of this document already on disk. No network, no quota."""
+        if not OPS_LINK_RE.match(link) or not self.cache_dir:
+            return []
+        folder = self.cache_dir / link.replace("published-data/images/", "").replace("/", "_")
+        if not folder.is_dir():
+            return []
+        out = []
+        for item in folder.glob("p[0-9][0-9][0-9][0-9].png"):
+            try:
+                out.append(int(item.stem[1:]))
+            except ValueError:                 # a name that only looks like ours
+                continue
+        return sorted(out)
 
     def ops_document_pdf(self, link: str, pages: int) -> tuple[bytes, int]:
         """The original document, stitched from OPS's per-page PDFs and cached."""
@@ -676,5 +721,9 @@ class Service:
 
     def close(self) -> None:
         self.client.close()
-        if self._ops is not None:
-            self._ops.close()
+        for client in ([self._ops] if self._ops is not None else []) + self._retired:
+            try:
+                client.close()
+            except Exception:                    # shutdown must not fail on cleanup
+                pass
+        self._retired.clear()

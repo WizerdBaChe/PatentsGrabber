@@ -8,24 +8,54 @@ Google 沒有的件改用 OPS：**EP 案連全文一起補上，美國案只有�
 
 ## 啟動
 
+### 拿到打包版的人（不需要 Python）
+
+下載 [Releases](../../releases) 裡的 `PatentsGrabber-<版本>-win64.zip`，
+解壓縮到任何你有寫入權限的地方，雙擊 **`PatentsGrabber.exe`**。
+
+- 瀏覽器會自己打開。**關掉那個黑色文字視窗就等於關掉程式**。
+- 重複雙擊不會開出第二個伺服器——第二次只會把你帶到已經在跑的那一份。
+- 查過的資料與圖式快取放在 `%LOCALAPPDATA%\PatentsGrabber`，**不在程式資料夾裡**，
+  所以直接用新版蓋掉整個程式資料夾不會弄丟任何東西。
+- 覺得哪裡不對，先跑一次自我檢查，它會逐項真的去 import，不是查表：
+
+```powershell
+.\PatentsGrabber.exe --selftest
+```
+
+### 從原始碼跑
+
 ```powershell
 python run.py
 ```
 
-或直接雙擊 `run.bat`（會自動開瀏覽器）。服務位於 <http://127.0.0.1:8000>。
-
-Stage 0 不需要任何 API 金鑰或註冊。
+服務位於 <http://127.0.0.1:8000>。沒有金鑰時仍可讀 Google Patents 有收錄的美國案。
 
 ## 金鑰設定（Stage 1 才需要）
 
-**金鑰只放 `.env`，不進版控，也不要貼進任何其他檔案、commit 訊息或對話。**
+**在畫面右上角按「設定」。** 貼上 EPO Developer Portal 上該 app 的
+Consumer Key 與 Consumer Secret，可以先按「測試連線」確認，再按「儲存」。
+立即生效，不用重開程式。
 
-```powershell
-copy .env.example .env
-```
+金鑰去哪裡了：
 
-用文字編輯器打開 `.env`，把 EPO Developer Portal 上該 app 的 Consumer Key 與
-Consumer Secret 填進去，存檔，然後驗證：
+| 執行方式 | 設定檔位置 |
+|---|---|
+| 打包版 | `%LOCALAPPDATA%\PatentsGrabber\settings.env` |
+| 原始碼 | 專案根目錄的 `.env`（git 忽略） |
+
+面板本身**永遠不會顯示金鑰**，只顯示長度與末四碼——夠你分辨兩把金鑰不同，
+不夠拿去用。任何一個 API 回應裡也不會有金鑰值，這件事由
+`tools/check_settings.py` 每次跑 gate 時斷言，而且那支檢查器自己先被餵過
+一個「一定要抓到」的字串。
+
+「OPS 位址」只接受 `epo.org` 底下的主機：金鑰是以 HTTP Basic 標頭送到那個位址的，
+所以它不能指向別的地方。
+
+也可以直接用文字編輯器改上表的檔案；程式下次打開設定面板時會發現、自動改用新值，
+並在畫面上寫一行「設定檔在外部被改過」——不會默默換掉。
+
+改完之後驗證：
 
 ```powershell
 python tools/verify_ops.py
@@ -125,7 +155,8 @@ US2025383260A1        (Espacenet 格式)
 
 - 標題、摘要、**說明書全文**（純文字，可複製、可搜尋）
 - **請求項逐項拆解**，獨立項置頂高亮、附屬項摺疊
-- **圖式檢視器**：縮圖列 ＋ 大圖 ＋ 點擊放大，`←` `→` 可翻頁
+- **圖式檢視器**：縮圖列 ＋ 大圖 ＋ 點擊放大，`←` `→` 可翻頁，
+  **`⟲` `⟳` 或 `[` `]` 左右轉 90°**
 
 ## 為人類閱讀而做的事（其他平台沒有特別做的部分）
 
@@ -140,6 +171,29 @@ US2025383260A1        (Espacenet 格式)
 - **章節跳轉**：說明書標題自動變成目錄
 - **閱讀設定**（會記住）：字級、行距、行寬、段距、段號顯示、襯線字體、元件編號高亮
 - 這些全部來自原始標記，**沒有任何 AI 改寫、摘要或翻譯**——結構拿不到就不顯示
+
+### 圖式：轉得動，而且轉了還看得完整
+
+專利圖不論本身是橫是直，都印在**直式圖頁**上，所以橫式的圖到手時是躺著的。
+`⟲` `⟳`（或鍵盤 `[` `]`）左右各轉 90°：
+
+- 轉過之後**整張仍然完整在框內**，不是把圖轉出去再讓你捲。放大時捲軸也捲得到左上角。
+- 角度**跟著同一件專利的翻頁保留**（同一件的圖頁方向通常一致），**換一件專利就歸零**。
+- 「頁面／寬度」兩種填滿方式在轉過之後一樣有效。
+
+這一段的幾何由 `tools/check_figures.py` 在真實 Chrome 裡量過——
+包含「轉四次要回到一模一樣的位置」與「放大後角落必須捲得到」。
+
+### EPO 的圖為什麼是一頁一頁進來
+
+因為 OPS **就是一次只給一頁**（`fullimage` / `drawing` 每頁一個請求），
+這是來源的形狀，不是這支程式慢。所以：
+
+- 圖式列在 EPO 模式下是**頁碼**而不是縮圖——顯示 25 張縮圖等於默默送出 25 個計費請求。
+- **已經在本機的頁碼底下有一條綠色底線**，點它不花配額；沒有底線的點下去會向 EPO 要一次。
+- 等待時會寫出「向 EPO 取第 N 頁　3.2 秒」——**連等了多久都寫出來**，
+  超過 6 秒還會補一句它可能正被 OPS 自己限流。
+- 看過的頁永久留在 `var/ops-cache/`，下次（甚至沒有金鑰時）直接由本機取出。
 
 ## EPO OPS 補上的兩個洞
 
@@ -174,19 +228,58 @@ US2025383260A1        (Espacenet 格式)
 
 ## 開發者工具
 
+**一個入口：**
+
+```powershell
+python tools/run_gates.py          # 本機層（不連網、不花配額）
+python tools/run_gates.py --net    # ＋會抓 Google Patents 的那幾關
+python tools/run_gates.py --all    # ＋會花 EPO OPS 配額的那兩關
+```
+
+摘要會在每個分數旁邊寫出**它的單位**，因為那些分數不是同一種東西
+（`check_reading` 一份文件一行，其餘一項檢查一行）。
+
+個別執行：
+
 ```powershell
 python tools/check_reading.py             # 分段結構是否只加結構、沒吃掉字（含正／負控與儀器校正）
+python tools/check_layout.py              # R-9／R-10：版面隨視窗（1920 與 2560，走 DevTools）
+python tools/check_figures.py             # 圖式面板幾何：旋轉、填滿方式、放大後的可捲範圍
+python tools/check_settings.py            # 設定往返、金鑰不出現在任何回應、本機守門
+python tools/check_secrets.py --tracked   # 全部已追蹤檔案的憑證掃描
+python tools/check_diagrams.py            # 畫出來的狀態圖與模型一致（會抓斷掉的箭頭定義）
 python tools/check_search.py              # 檢索是否誠實（截斷宣告、名稱變體、CQL 注入、正負對照）
-python tools/probe_coverage.py            # 覆蓋率探針（用本地快取的 HTML）
-python tools/probe_coverage.py --refresh  # 重新抓取所有樣本
 python tools/smoke_service.py             # 端到端煙霧測試
 python tools/verify_ops.py                # EPO OPS 能力驗證（需金鑰）
+python tools/probe_coverage.py            # 覆蓋率探針（用本地快取的 HTML）
 python tools/diag_images.py               # 圖檔網址形態診斷
 python tools/shoot.py US8046721B2 out.png --tab description   # 用本機 Chrome 截圖（可加 --dark）
+python tools/shoot_ui.py --url http://127.0.0.1:8000/?q=US6285999B1 `
+    --js "figRotate(1)" --out out.png                          # 先操作再截圖
+python tools/make_state_diagrams.py       # 重畫 docs/diagrams/state-snapshots.html
 ```
 
 `check_reading.py` 會刻意餵自己一份「把段落標記拿掉」的頁面，**那一份必須不通過**——
-一個永遠不會失敗的檢查等於沒有檢查。
+一個永遠不會失敗的檢查等於沒有檢查。同樣的正對照現在每一支新 gate 都有：
+洩漏偵測器先被餵一個已知會洩漏的字串，守門員的每個「必須擋」旁邊都有一個「必須放行」，
+幾何檢查器先被餵一條離格、穿過節點、沒錨定的邊。
+
+## 打包成可交付的檔案
+
+```powershell
+powershell -File packaging\build.ps1 -Clean
+```
+
+會依序做：跑完本機層 gate → PyInstaller（onedir）→ **啟動打包出來的 exe 並實際操作它**
+→ 壓成 `release\PatentsGrabber-<版本>-win64.zip` 並附 SHA256。
+
+任何一步失敗就停，不會產出一包「檔案存在但起不來」的東西——
+第一次打包正是這樣被擋下來的（相對 import 在 PyInstaller 的 `__main__` 脈絡下必死，
+而 PyInstaller 回報成功）。
+
+用 onedir 而不是 onefile 是刻意的：onefile 每次啟動都把整包解到
+`%TEMP%\_MEIxxxxxx`，而這個程式的關法就是按視窗的 X，那不是正常結束，
+解出來的目錄會累積而且沒有人能安全地清（`_MEI*` 是所有 PyInstaller onefile 程式共用的名字）。
 
 ## 文件
 
@@ -195,6 +288,12 @@ python tools/shoot.py US8046721B2 out.png --tab description   # 用本機 Chrome
 - `docs/03-ops-terms-compliance.md` —— OPS 使用條款分析（3.2 的公開散布禁令）
 - `docs/04-ops-verification-results.md` —— 金鑰能力驗證結果
 - `docs/05-stage1-spec.md` —— **Stage 1 工作規格**：規則彙整、已定案事實、工作切分、閱讀優化需求、驗收
+- `docs/06-stage1-review.md` —— 哪一條規則由哪一關守著，以及那些關卡在哪裡是瞎的
+- `docs/07-delivery-round.md` —— 2026-08-29 交付輪的邊界契約
+- `docs/09-state-models.md` —— **狀態模型正本**：設定面板、圖式面板、守門判定表、啟動器，含缺口報告
+- `docs/diagrams/state-snapshots.html` —— 上面那份的圖形投影（由 `tools/make_state_diagrams.py` 產生）
+- `docs/10-review-2026-08-29.md` —— 該輪深度審查（＋`.findings.json`／`.coverage.json`）
+- `docs/11-uat-2026-08-29.md` —— **人工驗收清單**：機器看不到的 26 項
 - `docs/archive/` —— 已被取代的文件版本（不刪除）
 
 ## 資料來源與界線

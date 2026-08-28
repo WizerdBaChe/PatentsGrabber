@@ -37,6 +37,16 @@ GATES = [
      "extractors cannot change without their schema constant moving"),
     ("tools/check_layout.py", "local", "one line per CHECK",
      "R-9/R-10: the layout follows the window (starts Chrome and, if needed, a server)"),
+    ("tools/check_figures.py", "local", "one line per CHECK",
+     "the drawing pane's geometry under rotation, fit and zoom (Chrome, no network)"),
+    ("tools/check_settings.py", "local", "one line per CHECK",
+     "settings round-trip, no credential in any response, the local-only guard"),
+    ("tools/check_secrets.py --tracked", "local", "one line per TRACKED FILE",
+     "no tracked file in this repository contains a credential"),
+    ("tools/make_state_diagrams.py --check", "local", "one line per CHECK",
+     "the state diagrams' own geometry: on grid, orthogonal, anchored, nothing pierced"),
+    ("tools/check_diagrams.py", "local", "one line per CHECK",
+     "the DRAWN diagram page matches the model (Chrome; catches dangling arrowheads)"),
     ("tools/smoke_service.py", "net", "one line per CHECK",
      "end-to-end lookup, storage, and the three ways it must fail loudly"),
     ("tools/check_freshness.py", "net", "one line per METRIC per document",
@@ -70,7 +80,9 @@ def main() -> int:
         print(f"[{tier}] {path} — {what}")
         print("=" * 78, flush=True)
         start = time.time()
-        code = subprocess.run([sys.executable, path], cwd=str(ROOT)).returncode
+        # A gate may carry its own flags (check_secrets audits every tracked
+        # file here, where the hook only judges the staged diff).
+        code = subprocess.run([sys.executable, *path.split()], cwd=str(ROOT)).returncode
         results.append((path, tier, unit, code, time.time() - start))
         print()
 
@@ -78,9 +90,9 @@ def main() -> int:
     print("SUMMARY — what each score counts")
     print("=" * 78)
     for path, tier, unit, code, secs in results:
-        print(f"  {VERDICT.get(code, f'exit {code}'):<20}{path:<38}{secs:6.1f}s   {unit}")
+        print(f"  {VERDICT.get(code, f'exit {code}'):<20}{path:<40}{secs:6.1f}s   {unit}")
     for path, tier, unit, what in skipped:
-        print(f"  {'not run (' + tier + ')':<20}{path:<38}{'':>7}   {unit}")
+        print(f"  {'not run (' + tier + ')':<20}{path:<40}{'':>7}   {unit}")
     if skipped:
         print("\n  A gate that did not run is not a gate that passed. Add --net / --all.")
 

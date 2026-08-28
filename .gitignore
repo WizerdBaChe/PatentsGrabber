@@ -19,6 +19,17 @@ token.json
 var/
 
 # ---------------------------------------------------------------------------
+# Build output. Regenerable from packaging/build.ps1, and large: a 50 MB zip in
+# git history is 50 MB in every clone forever. Releases carry the binary instead.
+# ---------------------------------------------------------------------------
+build/
+release/
+
+# Superseded files are moved here, never deleted (archive/WHY.md says why each
+# one moved). Kept out of the repository: it is a local record, not content.
+archive/
+
+# ---------------------------------------------------------------------------
 # Python
 # ---------------------------------------------------------------------------
 __pycache__/

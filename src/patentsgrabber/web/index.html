@@ -136,13 +136,22 @@
   .split:hover::after,.split.drag::after{background:var(--accent)}
 
   /* figures */
-  .figtop{flex:1 1 auto;display:flex;align-items:center;justify-content:center;
-          background:var(--figbg);overflow:auto;min-height:0;position:relative}
-  /* A patent sheet is portrait; the pane is landscape. Fit-to-page leaves the
-     sides empty on a wide screen, so the fit is a control, not a fixed choice. */
-  .figtop img{max-width:100%;max-height:100%;display:block;cursor:zoom-in}
-  .figtop img.fitw{max-width:100%;max-height:none;width:100%;align-self:flex-start}
-  .figtop img.zoom{max-width:none;max-height:none;width:210%;cursor:zoom-out}
+  /* `margin:auto` on the wrapper rather than `align-items:center` on the pane:
+     a centred flex item that outgrows its scroll container cannot be scrolled
+     back to its own top edge — the overflow goes to the unreachable side. That
+     matters here because zoom and rotation both produce items larger than the
+     pane, which is the whole point of them. */
+  .figtop{flex:1 1 auto;display:flex;background:var(--figbg);
+          overflow:auto;min-height:0;position:relative}
+  /* The wrapper carries the size the sheet OCCUPIES; the image inside carries
+     the size it IS. A quarter-turn swaps those two, and only a real box that
+     already holds the rotated dimensions makes the pane scroll the right way —
+     `transform` alone leaves the layout box unrotated and the scrollbars wrong. */
+  .figwrap{margin:auto;flex:0 0 auto;position:relative}
+  .figwrap img{position:absolute;top:50%;left:50%;display:block;cursor:zoom-in;
+               transform:translate(-50%,-50%) rotate(var(--rot,0deg));
+               transform-origin:center center}
+  .figwrap img.zoom{cursor:zoom-out}
   .figsrc button.on{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
   .figsrc{position:absolute;top:8px;right:10px;font:11px/1.5 var(--mono);color:var(--muted);
           background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:2px 9px;
@@ -153,7 +162,8 @@
            color:var(--warn);background:var(--warn-soft);border-radius:20px;padding:3px 11px}
   .figwait{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
            color:var(--muted);font:12px var(--mono);background:var(--figbg)}
-  .figempty{color:var(--muted);font-size:13px;padding:26px;text-align:center;max-width:46ch;line-height:1.85}
+  .figempty{color:var(--muted);font-size:13px;padding:26px;text-align:center;max-width:46ch;
+            line-height:1.85;margin:auto}
   .figbar{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:6px 10px;
           border-top:1px solid var(--line);background:var(--panel)}
   .figbar .n{font-family:var(--mono);font-size:12px;color:var(--muted);white-space:nowrap}
@@ -166,8 +176,15 @@
      not thumbnails: showing 25 thumbnails would silently download 25 pages. */
   .pages{display:flex;gap:4px;overflow-x:auto;flex:1;padding:2px 0}
   .pages button{flex:0 0 auto;padding:3px 9px;font:11.5px var(--mono);background:transparent;
-                color:var(--muted);border:1px solid var(--line);border-radius:6px}
+                color:var(--muted);border:1px solid var(--line);border-radius:6px;position:relative}
   .pages button.on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+  /* A filled underline means "this sheet is already on disk — opening it costs
+     nothing". Without it, the only way to find out what a page costs is to
+     spend it. */
+  .pages button.cached::after{content:"";position:absolute;left:5px;right:5px;bottom:1px;
+                              height:2px;border-radius:2px;background:var(--accent);opacity:.55}
+  .figbar .rot{padding:4px 8px;font-size:14px;line-height:1}
+  .figbar .rot.on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
 
   /* ---------- popovers ---------- */
   [popover]{margin:0;padding:0;border:1px solid var(--line);border-radius:11px;
@@ -273,6 +290,30 @@
   @media (max-width:1100px){ .rbody{flex-direction:column} .rside{flex:0 0 auto;border-left:none;
          border-top:1px solid var(--line);max-height:34dvh} }
 
+  /* ---------- settings ---------- */
+  .setform{display:grid;grid-template-columns:auto 1fr;gap:9px 12px;align-items:center;
+           font-size:13px;min-width:min(430px,84vw)}
+  .setform label{color:var(--muted);white-space:nowrap}
+  .setform input{width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:7px;
+                 background:var(--bg);color:var(--ink);font:12.5px var(--mono)}
+  .setform .full{grid-column:1/-1}
+  .setform .acts{grid-column:1/-1;display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:3px}
+  .setform .acts button{padding:6px 13px;font-size:13px}
+  .setform .acts .ghost{background:transparent;color:var(--ink);border-color:var(--line)}
+  .setsec{font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);
+          font-weight:600;margin:16px 0 8px;padding-top:13px;border-top:1px solid var(--line)}
+  .setsec:first-child{margin-top:0;padding-top:0;border-top:none}
+  .setnote{font-size:12.5px;color:var(--muted);line-height:1.75;margin:0 0 10px}
+  .setnote code{font-family:var(--mono);font-size:11.5px}
+  .setstat{font-size:12.5px;line-height:1.7;padding:8px 11px;border-radius:8px;
+           background:var(--bg);border:1px solid var(--line);margin:0 0 11px;word-break:break-all}
+  .setstat.good{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+  .setstat.bad{border-color:var(--warn);background:var(--warn-soft);color:var(--warn)}
+  .setpaths{font-family:var(--mono);font-size:11.5px;color:var(--muted);line-height:1.85;
+            word-break:break-all}
+  .setpaths b{color:var(--ink);font-weight:600}
+  .chip.needs{background:var(--warn-soft);color:var(--warn);border-color:transparent}
+
   /* welcome / error */
   .center{flex:1 1 auto;display:flex;align-items:center;justify-content:center;padding:30px}
   .box{max-width:620px;background:var(--panel);border:1px solid var(--line);
@@ -294,6 +335,7 @@
   <button id="go">查詢</button>
   <button id="refresh" class="ghost" title="略過本地庫，重新抓取">重抓</button>
   <button class="chip" id="libchip" popovertarget="pop-lib">庫 <b>0</b></button>
+  <button class="chip" id="setchip" popovertarget="pop-settings" title="EPO OPS 金鑰與資料位置">設定</button>
 </div>
 <div id="netbar" class="netbar"></div>
 
@@ -330,12 +372,51 @@
   <div class="pop-b"><div class="outline" id="outlinebody"></div></div>
 </div>
 
+<!-- Settings. Values go IN and never come back out: the two credential fields
+     are always empty on open, and what the panel shows instead is a length and
+     the last four characters — enough to tell one key from another, not enough
+     to be one. That is why there is no "show password" control here. -->
+<div id="pop-settings" popover>
+  <div class="pop-h">設定</div>
+  <div class="pop-b">
+    <div class="setsec">EPO OPS 金鑰</div>
+    <p class="setnote">高解析圖式、原文件 PDF、申請人檢索與最新公開案都走 EPO OPS，需要一組
+      免費金鑰。到 <a href="https://developers.epo.org/" target="_blank" rel="noopener">EPO
+      Developer Portal ↗</a> 註冊、建立一個 app（選 <b>NON-PAYING</b>），把 Consumer Key
+      與 Consumer Secret 貼進來。沒有金鑰時本程式仍可讀 Google Patents 有收錄的美國案。</p>
+    <div class="setstat" id="setstat">讀取中…</div>
+    <div class="setform">
+      <label for="s-key">Consumer Key</label>
+      <input id="s-key" type="password" autocomplete="off" spellcheck="false" placeholder="（留空＝不改動）">
+      <label for="s-sec">Consumer Secret</label>
+      <input id="s-sec" type="password" autocomplete="off" spellcheck="false" placeholder="（留空＝不改動）">
+      <label for="s-url">OPS 位址</label>
+      <input id="s-url" type="text" autocomplete="off" spellcheck="false">
+      <div class="acts">
+        <button id="s-test" class="ghost">測試連線</button>
+        <button id="s-save">儲存</button>
+        <button id="s-clear" class="ghost" title="從設定檔移除金鑰">清除金鑰</button>
+      </div>
+    </div>
+    <div class="setsec">資料位置</div>
+    <p class="setnote">查過的每一件、每一張已付費取回的圖式都留在這裡。整個資料夾備份走，
+      換一台機器接上就是同一個庫。</p>
+    <div class="setpaths" id="setpaths"></div>
+  </div>
+</div>
+
 <script>
 const $  = s => document.querySelector(s);
 const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 let CARD = null, TABKEY = 'abstract';
 // One figure model for both sources: Google's direct PNGs and EPO's page service.
-let FIGS = {mode:'none', urls:[], link:'', pages:0, i:0, google:[], ops:null};
+//   rot    quarter turns clockwise, 0-3. Patent drawings are printed on portrait
+//          sheets whatever the drawing's own orientation, so a landscape figure
+//          arrives lying on its side and no amount of zoom fixes that.
+//   cached sheet numbers already on disk (EPO only) — see the note by `figStrip`.
+let FIGS = {mode:'none', urls:[], link:'', pages:0, i:0, google:[], ops:null,
+            rot:0, cached:new Set()};
+const ZOOM = 2.1;                    // click-to-zoom factor, was `width:210%`
 // How a drawing sheet fills the pane: 'page' (whole sheet) or 'width' (fill the
 // pane and scroll) — the second exists because a portrait sheet fitted to height
 // leaves a third of a 1920 pane empty. Persisted like the other reading settings.
@@ -408,6 +489,165 @@ function wireRead(){
     applyIdealSplit(true);
   };
   applyRead(false);
+}
+
+/* ---------------- waiting, out loud ----------------
+   Nothing here may sit silently for more than a moment. The rule is not "show a
+   spinner": it is say WHAT is being waited for and HOW LONG it has been waited
+   for, so that a slow source and a hung one look different to the reader. The
+   search box has had this since the start; the two waits added in this round —
+   a settings save and an EPO sheet — get it from the same helper rather than
+   from two more copies of the same idea. Returns the stop function. */
+function ticker(el, label, slowAfter, slowNote){
+  if(!el) return () => {};
+  const t0 = performance.now();
+  const paint = () => {
+    const s = (performance.now() - t0) / 1000;
+    el.textContent = `${label}　${s.toFixed(1)} 秒`
+                   + (slowAfter && s > slowAfter ? `　${slowNote}` : '');
+  };
+  paint();
+  const id = setInterval(paint, 200);
+  return () => clearInterval(id);
+}
+
+/* ---------------- settings ----------------
+   The page holds no credential, at any moment. Fields start empty and are
+   emptied again the instant a save returns, so a screenshot of this panel — or
+   a stray copy of this tab's memory — carries nothing usable. Everything shown
+   comes from /api/settings, which answers in lengths and last-four, never in
+   values. */
+let SETTINGS = null;
+
+function renderSettings(s){
+  SETTINGS = s;
+  const ops = s.ops || {};
+  const stat = $('#setstat');
+  const shadow = (s.shadowed_by_environment || []);
+  stat.className = 'setstat ' + (ops.configured ? 'good' : 'bad');
+  stat.innerHTML = ops.configured
+    ? `已設定金鑰　Key ${esc(ops.key_hint || '—')}　·　Secret ${esc(ops.secret_hint || '—')}`
+    : '尚未設定金鑰。EPO 相關功能（高解析圖式、原文件、檢索）目前不可用。';
+  if(shadow.length){
+    stat.innerHTML += `<br>注意：系統環境變數 <b>${esc(shadow.join('、'))}</b> 與設定檔不同，
+                       目前以設定檔為準。`;
+  }
+  // Somebody edited the file (or another window saved) since this program last
+  // looked, and it has just switched over. Silently picking up a new credential
+  // is how "it started behaving differently and I do not know why" happens.
+  if(s.adopted_file_change){
+    stat.innerHTML += '<br>設定檔在外部被改過，已改用檔案裡的新值。';
+  }
+  $('#s-url').value = ops.base_url || '';
+  const p = s.paths || {};
+  $('#setpaths').innerHTML = [
+    ['執行模式', p.mode], ['設定檔', p.settings_file],
+    ['專利庫', p.library], ['圖式快取', p.ops_cache],
+  ].map(([k,v]) => `<b>${esc(k)}</b>　${esc(v||'—')}`).join('<br>')
+    + `<br><b>版本</b>　${esc(s.version||'')}`;
+  // The chip is the only place a first-time user can be told that the thing
+  // they just failed to do has a home.
+  const chip = $('#setchip');
+  chip.classList.toggle('needs', !ops.configured);
+  chip.textContent = ops.configured ? '設定' : '設定 ⚠';
+}
+
+async function loadSettings(){
+  try{ renderSettings(await (await fetch('/api/settings')).json()); }
+  catch(e){ $('#setstat').textContent = '讀不到設定：' + e.message; }
+}
+
+/* What the panel is allowed to send. An empty box means "leave it alone", which
+   is the only reading that works when the box was never filled from the server. */
+function settingsBody(){
+  const body = {};
+  const key = $('#s-key').value.trim(), sec = $('#s-sec').value.trim(),
+        url = $('#s-url').value.trim();
+  if(key) body.ops_key = key;
+  if(sec) body.ops_secret = sec;
+  if(url && url !== (SETTINGS?.ops?.base_url || '')) body.ops_base_url = url;
+  return body;
+}
+
+// Longer than the server's own 40 s OPS timeout, so an abort here means the
+// SERVER stopped answering — a different fault from "EPO is slow", and worth
+// telling apart. Without it a hung request leaves the panel disabled forever.
+const SETTINGS_TIMEOUT_MS = 60000;
+
+async function settingsPost(path, body, busyText){
+  const stat = $('#setstat');
+  const buttons = [...document.querySelectorAll('.setform .acts button')];
+  buttons.forEach(b => b.disabled = true);
+  stat.className = 'setstat';
+  const stop = ticker(stat, busyText, 8, '（EPO 有時候要等一下）');
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), SETTINGS_TIMEOUT_MS);
+  try{
+    const r = await fetch(path, {
+      method:'POST',
+      // JSON content type on purpose: it takes a CORS preflight to send, which
+      // no cross-site page can obtain from this server. A form-encoded POST
+      // would need no preflight at all.
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body||{}),
+      signal: abort.signal,
+    });
+    return {ok:r.ok, data: await r.json()};
+  }catch(e){
+    stat.className = 'setstat bad';
+    stat.textContent = e.name === 'AbortError'
+      ? `等了 ${SETTINGS_TIMEOUT_MS/1000} 秒仍沒有回應，已中止。這是本機伺服器沒回話，不是 EPO 慢。`
+      : '送不出去：' + e.message;
+    return null;
+  }finally{
+    clearTimeout(timer);
+    stop();
+    buttons.forEach(b => b.disabled = false);
+  }
+}
+
+function wireSettings(){
+  $('#s-test').onclick = async () => {
+    const r = await settingsPost('/api/settings/test', settingsBody(),
+                                 '正在向 EPO 換取 access token…');
+    if(!r) return;
+    $('#setstat').className = 'setstat ' + (r.data.ok ? 'good' : 'bad');
+    $('#setstat').textContent = r.data.detail || (r.data.ok ? '可用' : '不可用');
+  };
+  $('#s-save').onclick = async () => {
+    const body = settingsBody();
+    if(!Object.keys(body).length){
+      $('#setstat').className = 'setstat';
+      $('#setstat').textContent = '沒有任何欄位被改動。';
+      return;
+    }
+    const r = await settingsPost('/api/settings', body, '寫入設定檔…');
+    if(!r) return;
+    if(!r.ok){
+      $('#setstat').className = 'setstat bad';
+      $('#setstat').textContent = r.data.error || '儲存失敗。';
+      return;
+    }
+    $('#s-key').value = ''; $('#s-sec').value = '';   // never keep one around
+    renderSettings(r.data);
+    $('#setstat').className = 'setstat good';
+    $('#setstat').innerHTML = `已存到 <span class="mono">${esc(r.data.saved_to||'')}</span>。
+        立即生效，不用重開程式。`;
+  };
+  $('#s-clear').onclick = async () => {
+    if(!confirm('要從設定檔移除 EPO OPS 金鑰嗎？\n已存在本機的專利與圖式不會被刪除。')) return;
+    const r = await settingsPost('/api/settings/clear', {}, '移除金鑰…');
+    if(!r) return;
+    $('#s-key').value = ''; $('#s-sec').value = '';
+    renderSettings(r.data);
+    $('#setstat').className = 'setstat bad';
+    $('#setstat').textContent = '金鑰已從設定檔移除。';
+  };
+  // Re-read on every open: another window, or a hand edit of the file, may have
+  // changed it since this tab last looked.
+  $('#pop-settings').addEventListener('toggle', e => {
+    if(e.newState === 'open'){ $('#s-key').value=''; $('#s-sec').value=''; loadSettings(); }
+  });
 }
 
 /* ---------------- popover plumbing ---------------- */
@@ -704,6 +944,8 @@ function figSrc(i){
   return '';
 }
 function renderFigures(c, forceMode){
+  figWaitStop();          // the pane below is about to be replaced; a timer left
+                          // running would tick against a node nobody can see
   const g = c.images || [];
   const ops = c.ops && c.ops.available ? c.ops : null;
   FIGS.google = g;
@@ -722,6 +964,11 @@ function renderFigures(c, forceMode){
   else if(g.length)  { FIGS.mode='google'; FIGS.urls=g; FIGS.pages=g.length; FIGS.link=''; }
   else               { FIGS.mode='none'; FIGS.pages=0; }
   FIGS.i = useOps && FIGS.ops.whole ? Math.min(FIGS.ops.start, FIGS.pages) - 1 : 0;
+  // A new document, or a switch of source, starts upright with nothing known to
+  // be on disk. Carrying either across would be a claim about the new document
+  // made from the old one's evidence.
+  FIGS.rot = 0;
+  FIGS.cached = new Set();
 
   const pane = $('#figpane');
   if(FIGS.mode === 'none'){
@@ -741,17 +988,10 @@ function renderFigures(c, forceMode){
                  : !FIGS.ops.whole ? 'EPO OPS · 300 dpi 圖式'
                  : FIGS.ops.hasDrawings ? `EPO OPS · 原文件掃描（圖式自第 ${FIGS.ops.start} 頁起）`
                  : 'EPO OPS · 原文件掃描（此件無獨立圖式頁）';
-  const strip = FIGS.mode==='google'
-    ? `<div class="thumbs" id="thumbs">${FIGS.urls.map((u,i)=>
-        `<img src="${esc(u)}" data-i="${i}" class="${i?'':'on'}" loading="lazy" alt="圖 ${i+1}"
-              onerror="this.style.display='none'">`).join('')}</div>`
-    // Numbered strip, not thumbnails: each EPO page is a separate metered fetch.
-    : `<div class="pages" id="pagestrip">${Array.from({length:FIGS.pages},(_,i)=>
-        `<button data-i="${i}" class="${i?'':'on'}">${i+1}</button>`).join('')}</div>`;
 
   pane.innerHTML = `
-      <div class="figtop">
-        <img id="figbig" alt="圖式 1">
+      <div class="figtop" id="figtop">
+        <div class="figwrap" id="figwrap"><img id="figbig" alt="圖式 1"></div>
         <div class="figwait" id="figwait">載入中…</div>
         <div class="figsrc">${esc(srcLabel)}
           <button data-fit="page" class="${FIT==='page'?'on':''}" title="整張圖頁都看得到">頁面</button>
@@ -764,10 +1004,106 @@ function renderFigures(c, forceMode){
         <button id="figprev" title="上一張（←）">‹</button>
         <span class="n" id="fign">1 / ${FIGS.pages}</span>
         <button id="fignext" title="下一張（→）">›</button>
-        ${strip}
+        <button class="rot" id="figrotl" title="向左轉 90°（[）" aria-label="向左轉 90 度">⟲</button>
+        <button class="rot" id="figrotr" title="向右轉 90°（]）" aria-label="向右轉 90 度">⟳</button>
+        <span class="n" id="figrotn" style="display:none"></span>
+        <div id="stripslot" style="display:contents"></div>
       </div>`;
+  figStrip();
   wireFigures();
   figShow(FIGS.i);
+  if(FIGS.mode==='ops') loadCachedPages();
+}
+
+/* The strip under the drawing. Two shapes, for one reason each.
+
+   Google's PNGs are already free and already fetched, so thumbnails cost
+   nothing and a picture is the better handle.
+
+   EPO's are not: OPS serves `fullimage` and `drawing` ONE PAGE PER REQUEST —
+   that is the shape of the source, not a slow implementation — so 25 thumbnails
+   would be 25 metered requests nobody asked for. Numbers instead, and the ones
+   already on disk are underlined, so the reader can see what a click costs
+   before making it. */
+function figStrip(){
+  const slot = $('#stripslot');
+  if(!slot) return;
+  slot.innerHTML = FIGS.mode==='google'
+    ? `<div class="thumbs" id="thumbs">${FIGS.urls.map((u,i)=>
+        `<img src="${esc(u)}" data-i="${i}" class="${i===FIGS.i?'on':''}" loading="lazy"
+              alt="圖 ${i+1}" onerror="this.style.display='none'">`).join('')}</div>`
+    : `<div class="pages" id="pagestrip">${Array.from({length:FIGS.pages},(_,i)=>
+        `<button data-i="${i}" class="${i===FIGS.i?'on':''}${
+          FIGS.cached.has(i+1)?' cached':''}" title="${
+          FIGS.cached.has(i+1)?'已在本機，開啟不花配額':'尚未取回，開啟會向 EPO 要一次'}"
+         >${i+1}</button>`).join('')}</div>`;
+}
+
+/* Which sheets are already paid for. One local call, no network, no quota —
+   asked once per document so the strip can be honest from the start rather than
+   only after the reader has spent a request finding out. */
+async function loadCachedPages(){
+  if(FIGS.mode!=='ops' || !FIGS.link) return;
+  const link = FIGS.link;
+  try{
+    const d = await (await fetch('/api/ops/cached-pages?link=' + encodeURIComponent(link))).json();
+    if(FIGS.link !== link) return;             // the reader moved on while we asked
+    FIGS.cached = new Set(d.pages || []);
+    figStrip();
+  }catch(e){}
+}
+
+/* ---- how big the sheet is drawn, given fit, zoom and rotation ----
+
+   Everything about the drawing pane's geometry is decided here, in pixels, so
+   that one rule holds no matter which of the three controls the reader touched:
+   the WRAPPER is the space the sheet occupies on screen, the IMAGE is the sheet
+   itself, and a quarter turn swaps which of the image's sides faces which of
+   the wrapper's. Left to CSS alone, a rotated image keeps its unrotated layout
+   box — it would overlap the pane's edges and scroll along the wrong axis. */
+function figLayout(){
+  const top = $('#figtop'), wrap = $('#figwrap'), img = $('#figbig');
+  if(!top || !wrap || !img || !img.naturalWidth) return;
+  const CW = top.clientWidth, CH = top.clientHeight;
+  // A pane with no size yet (hidden tab, a render before first layout) would
+  // otherwise be told the sheet is 0 px wide — and a 0 px image stays invisible
+  // after the pane appears, because nothing recomputes on its own. The observer
+  // below calls back the moment there IS a size, so waiting costs nothing.
+  if(CW < 1 || CH < 1) return;
+  const aspect = img.naturalHeight / img.naturalWidth;     // h per unit w
+  const turned = FIGS.rot % 2 === 1;                       // a quarter or three
+  let w;
+  if(FIT === 'width'){
+    // Fill the pane sideways and scroll down it. After a quarter turn the side
+    // facing sideways is the image's HEIGHT, so it is that which must equal CW.
+    w = turned ? CW / aspect : CW;
+  } else {
+    // Fit whole. Both sides must land inside the pane; which image side is
+    // constrained by which pane side is exactly what the turn swaps.
+    w = turned ? Math.min(CH, CW / aspect) : Math.min(CW, CH / aspect);
+  }
+  if(img.classList.contains('zoom')) w *= ZOOM;
+  const h = w * aspect;
+  img.style.width = w + 'px';
+  img.style.height = h + 'px';
+  img.style.setProperty('--rot', (FIGS.rot * 90) + 'deg');
+  wrap.style.width  = (turned ? h : w) + 'px';
+  wrap.style.height = (turned ? w : h) + 'px';
+}
+
+function figRotate(turns){
+  FIGS.rot = ((FIGS.rot + turns) % 4 + 4) % 4;
+  const label = $('#figrotn');
+  if(label){
+    label.textContent = FIGS.rot ? `旋轉 ${FIGS.rot * 90}°` : '';
+    label.style.display = FIGS.rot ? '' : 'none';
+  }
+  document.querySelectorAll('.figbar .rot').forEach(b => b.classList.toggle('on', !!FIGS.rot));
+  // Rotation is a property of the reader's view of THIS document: a landscape
+  // drawing is usually landscape on every sheet of the same patent, so it
+  // survives paging. renderFigures() resets it, which is where a new document
+  // (or a switch of source) arrives.
+  figLayout();
 }
 
 function figShow(i, hint){
@@ -776,8 +1112,19 @@ function figShow(i, hint){
   const big = $('#figbig'), wait = $('#figwait');
   if(!big) return;
   big.classList.remove('zoom');
+  figWaitStop();
   if(wait){
-    wait.textContent = FIGS.mode === 'ops' ? `向 EPO 取第 ${FIGS.i+1} 頁…` : '載入中…';
+    // OPS meters and throttles per minute: a burst of page requests makes the
+    // server hold the next one back deliberately (epo_ops._throttle). Without an
+    // elapsed count that is indistinguishable from a hang, so it gets one — and
+    // says which of the two it probably is once the wait gets long.
+    figWaitStop = ticker(wait,
+      FIGS.mode === 'ops'
+        ? (FIGS.cached.has(FIGS.i+1) ? `讀取第 ${FIGS.i+1} 頁（本機，不花配額）`
+                                     : `向 EPO 取第 ${FIGS.i+1} 頁`)
+        : '載入圖式',
+      FIGS.mode === 'ops' ? 6 : 8,
+      FIGS.mode === 'ops' ? '（EPO 逐頁提供，忙碌時會被它自己限流）' : '（來源較慢）');
     wait.style.display = 'flex';
   }
   big.src = figSrc(FIGS.i);
@@ -797,31 +1144,55 @@ function figShow(i, hint){
   if(FIGS.mode==='ops' && FIGS.pages > 1){ const n = new Image(); n.src = figSrc((FIGS.i+1)%FIGS.pages); }
 }
 
+let figRO = null;
+let figWaitStop = () => {};
 function wireFigures(){
-  const big = $('#figbig'), wait = $('#figwait');
-  big.classList.toggle('fitw', FIT === 'width');
+  const big = $('#figbig'), wait = $('#figwait'), top = $('#figtop');
   document.querySelectorAll('.figsrc [data-fit]').forEach(b => b.onclick = () => {
     FIT = b.dataset.fit;
     try{ localStorage.setItem('pg.figfit', FIT); }catch(e){}
     document.querySelectorAll('.figsrc [data-fit]').forEach(x => x.classList.toggle('on', x === b));
     big.classList.remove('zoom');
-    big.classList.toggle('fitw', FIT === 'width');
+    figLayout();
   });
-  big.onload = () => { if(wait) wait.style.display='none'; };
+  big.onload = () => {
+    figWaitStop();
+    if(wait) wait.style.display='none';
+    // The natural size is only known now, and every dimension below is derived
+    // from it — so the first layout has to happen here, not at render time.
+    figLayout();
+    // Mark the sheet as paid for the moment it arrives, so the strip stops
+    // warning about a cost that has already been met.
+    if(FIGS.mode==='ops' && !FIGS.cached.has(FIGS.i+1)){
+      FIGS.cached.add(FIGS.i+1);
+      figStrip();
+    }
+  };
   // A drawing that 404/403s must say so, never render as a broken-image glyph.
   big.onerror = () => {
+    figWaitStop();                 // or the counter keeps overwriting the reason
     if(wait){ wait.textContent = `第 ${FIGS.i+1} 張圖無法載入（來源拒絕存取）。其餘圖片可能仍可檢視。`;
               wait.style.display='flex'; }
   };
-  big.onclick = () => big.classList.toggle('zoom');
+  big.onclick = () => { big.classList.toggle('zoom'); figLayout(); };
   $('#figprev').onclick = () => figShow(FIGS.i-1);
   $('#fignext').onclick = () => figShow(FIGS.i+1);
-  const strip = $('#thumbs') || $('#pagestrip');
-  if(strip) strip.onclick = e => {
+  $('#figrotl').onclick = () => figRotate(-1);
+  $('#figrotr').onclick = () => figRotate(+1);
+  // Delegated: figStrip() replaces the strip's markup whenever the cache map
+  // changes, and a handler bound to the old node would go with it.
+  const slot = $('#stripslot');
+  if(slot) slot.onclick = e => {
     const t = e.target.closest('[data-i]'); if(t) figShow(+t.dataset.i);
   };
   const swap = $('#figswap');
   if(swap) swap.onclick = () => renderFigures(CARD, FIGS.mode==='google' ? 'ops' : 'google');
+  // The pane resizes when the window does and when the splitter is dragged;
+  // both change what "fit" means. One observer, replaced with the pane.
+  if(figRO) figRO.disconnect();
+  figRO = new ResizeObserver(() => figLayout());
+  if(top) figRO.observe(top);
+  figRotate(0);                 // paint the rotation label/state for this render
 }
 
 /* FIG. n -> a sheet. The mapping is a guess and says so: a sheet can carry
@@ -1203,6 +1574,9 @@ document.addEventListener('keydown', e => {
   if(e.target.tagName==='INPUT' || e.target.tagName==='TEXTAREA') return;
   if(e.key==='ArrowLeft') figShow(FIGS.i-1);
   if(e.key==='ArrowRight') figShow(FIGS.i+1);
+  // [ and ] sit next to each other and turn the sheet the way they lean.
+  if(e.key==='[' && $('#figrotl')) figRotate(-1);
+  if(e.key===']' && $('#figrotr')) figRotate(+1);
 });
 $('#go').onclick = () => go(false);
 $('#refresh').onclick = () => go(true);
@@ -1228,7 +1602,9 @@ window.addEventListener('resize', () => {
 const saved = localStorage.getItem('pg.split');
 if(saved) document.documentElement.style.setProperty('--split', saved);
 wireRead();
+wireSettings();
 loadLib();
+loadSettings();
 const url = new URLSearchParams(location.search);
 const deep = url.get('q');
 if(deep){

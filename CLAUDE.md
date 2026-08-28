@@ -26,7 +26,43 @@ ops-relaxation: L1
   (`robots.txt` allows `/patent/`, disallows the rest).
 - **Quota is metered by OPS's own headers**, never by a hard-coded threshold;
   page images are fetched only when looked at and cached under `var/ops-cache/`.
-- Credentials live in `.env` only. Never print, log, or paste a key value.
+- Credentials live in the settings file only (`.env` in a checkout,
+  `%LOCALAPPDATA%\PatentsGrabber\settings.env` when packaged; both via
+  `paths.settings_path()`). Never print, log, or paste a key value.
+
+## No response may contain a credential, and the guard is not optional
+
+Two properties of the ASSET, both gated by `tools/check_settings.py` (and again
+against the packaged build by `tools/check_release.py`):
+
+- **No HTTP response body may contain a key or secret value.** Hints only —
+  length plus the last four characters, via `config.hint`. The browser is never
+  given a secret, which is why an omitted field on POST means "keep the stored
+  one" and cannot mean anything else.
+- **A loopback port is reachable from every tab in the browser.** `app._guard`
+  rejects a non-loopback `Host` (DNS rebinding), a foreign `Origin`, and
+  `Sec-Fetch-Site: cross-site`. Each rejection has a matching must-ACCEPT case
+  in the gate; a guard tested only against bad inputs scores full marks by
+  refusing everything.
+
+`OPS_BASE_URL` is validated against `config.ALLOWED_BASE_HOSTS`, by the same
+validator on both the save and the test path — the key travels there as an HTTP
+Basic header, so a free-text host is a credential-exfiltration field. Loosening
+that list means loosening where the credential can go.
+
+## Two modes, one program
+
+`paths.py` decides where data lives: a checkout keeps everything under the repo
+root (every gate asserts against `var/…` by that path), a packaged build keeps it
+under `%LOCALAPPDATA%`. **Never write beside the executable** — a program folder
+is not writable in the general case, and that failure only appears on somebody
+else's machine.
+
+`packaging/build.ps1` will not produce a release that has not been started and
+driven. This is not belt and braces: the first packaged build reported success
+and died instantly on a relative import, because PyInstaller runs its entry
+script as `__main__` with no package context. `tools/check_release.py` is what
+caught it, and it is why the entry point's import is absolute.
 
 ## Stored cards carry the version of the code that built them
 
@@ -87,7 +123,18 @@ re-tried on the next read.
   each score's denominator is, because they are not the same unit.
   Individually: `tools/check_reading.py` (structure added without losing text,
   controls both ways, self-calibrating), `tools/check_layout.py` (R-9/R-10 over
-  DevTools at 1920 and 2560), `tools/check_freshness.py` (the archive still
-  matches the live source), `tools/verify_ops.py`, `tools/check_search.py`,
-  `tools/smoke_service.py`, `tests/test_ops_number_formats.py`,
-  `tests/test_extractor_fingerprint.py`
+  DevTools at 1920 and 2560), `tools/check_figures.py` (the drawing pane's
+  geometry under rotation, fit and zoom), `tools/check_settings.py` (settings
+  round-trip, no credential in any response, the local-only guard),
+  `tools/check_diagrams.py` (the drawn state diagrams match their model),
+  `tools/check_freshness.py` (the archive still matches the live source),
+  `tools/verify_ops.py`, `tools/check_search.py`, `tools/smoke_service.py`,
+  `tests/test_ops_number_formats.py`, `tests/test_extractor_fingerprint.py`
+- **Every gate here carries a positive control**, because a checker that cannot
+  fail is not a checker. When you add one, add the input it must catch in the
+  same commit. Two of this project's gates were wrong in exactly the way a
+  one-sided calibration hides: `check_search`'s "an exact name collapses to one
+  applicant" was pinned to OPS's applicant normalisation, which changed
+  (2026-08-29) — the product was right and the assertion was stale. An
+  assertion calibrated against a corpus we do not control **expires by default**
+  and gets a `review-when` line naming the event, never a date.
