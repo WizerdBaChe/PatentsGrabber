@@ -1,8 +1,23 @@
-# All of these were already present on the development machine; the file exists
-# so a fresh clone does not have to discover them by crashing.
+# A fresh clone should not have to discover its dependencies by crashing.
+#
+# Pillow and pypdf were missing from this list until 2026-08-29 even though the
+# code has always needed them: both are imported inside the function that uses
+# them, so on the development machine — where they happened to be installed —
+# nothing ever said so. They are what turn EPO's TIFF sheets into something a
+# browser can draw and its per-page PDFs into one document.
+
 httpx>=0.27
 beautifulsoup4>=4.12
 lxml>=5.0
 fastapi>=0.115
 uvicorn>=0.30
 python-dotenv>=1.0
+Pillow>=10.0
+pypdf>=4.0
+
+# Only for the gates, not for running the program:
+#   websockets  — check_layout.py / check_figures.py drive Chrome over DevTools
+websockets>=12.0
+
+# Only for building a release (packaging/build.ps1):
+#   pyinstaller>=6.0
