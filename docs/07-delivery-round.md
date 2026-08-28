@@ -3,8 +3,8 @@
 ## 0. Boundary contract（施工前先立，收尾時逐條回檢）
 
 **Premises**
-- P-env（verify）：Windows 11、Python 3.12.7、PyInstaller 6.19.0、`gh` 2.95.0 已登入
-  `WizerdBaChe`。全部實測過，非假設。
+- P-env（verify）：Windows 11、Python 3.12.7、PyInstaller 6.19.0、`gh` 2.95.0
+  已完成登入。全部實測過，非假設。
 - P-intent（report）：使用者要的是「別人（含未來的自己）拿到就能用」——所以設定要有 UI、
   啟動要是一個可執行檔、金鑰不可進版控。
 - P-validity（verify）：`git log --all -- .env` 為空，`.env` 從未進過任何 commit。
