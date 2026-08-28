@@ -34,8 +34,12 @@ def find_chrome() -> Path:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("number")
+    ap.add_argument("number", help="patent number, or '-' when --url is given")
     ap.add_argument("out")
+    # Any page, not only a card: the generated state diagrams are an HTML file on
+    # disk, and they need the same out-of-process capture for the same reason —
+    # the browser pane is hidden and cannot composite pixels.
+    ap.add_argument("--url", help="shoot this URL (or file path) instead of a card")
     # Defaults match the machine this is actually read on (FHD); QHD is the other
     # size that matters here. Verifying at 1024/1440 hid a wide-screen layout
     # problem that only shows up when the pane is much wider than the text column.
@@ -50,7 +54,10 @@ def main() -> int:
 
     out = Path(a.out).resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
-    url = f"{a.base}/?q={a.number}" + (f"&tab={a.tab}" if a.tab else "")
+    if a.url:
+        url = a.url if "://" in a.url else Path(a.url).resolve().as_uri()
+    else:
+        url = f"{a.base}/?q={a.number}" + (f"&tab={a.tab}" if a.tab else "")
 
     with tempfile.TemporaryDirectory() as profile:
         cmd = [

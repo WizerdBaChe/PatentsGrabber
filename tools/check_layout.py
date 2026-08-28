@@ -160,6 +160,21 @@ class Chrome:
         self.eval("window.dispatchEvent(new Event('resize'))")
         self.eval(SETTLE_JS % 500, await_promise=True)
 
+    def screenshot(self, path, full_page: bool = False):
+        """Capture pixels out of process — the browser pane is hidden and cannot.
+
+        Lives on the driver rather than in a second Chrome wrapper so that the
+        window that was resized, navigated and clicked is the one photographed.
+        """
+        import base64
+        params = {"format": "png"}
+        if full_page:
+            params["captureBeyondViewport"] = True
+        data = self.send("Page.captureScreenshot", **params)["data"]
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_bytes(base64.b64decode(data))
+        return Path(path)
+
     def close(self):
         try:
             self.ws.close()
