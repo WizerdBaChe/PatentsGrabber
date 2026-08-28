@@ -113,7 +113,11 @@ $zipMB = (Get-Item $zip).Length / 1MB
 $sha = (Get-FileHash -Algorithm SHA256 $zip).Hash
 Note ("{0}  {1:N0} MB" -f (Split-Path -Leaf $zip), $zipMB)
 Note "SHA256  $sha"
-Set-Content -Path "$zip.sha256" -Value "$sha  $(Split-Path -Leaf $zip)" -Encoding utf8
+# -Encoding utf8 in Windows PowerShell 5.1 means UTF-8 WITH a BOM, and a BOM in a
+# checksum file ends up inside the first field of anything that reads it.
+# WriteAllText with a plain UTF8Encoding($false) is the version that does not.
+[System.IO.File]::WriteAllText("$zip.sha256", "$sha  $(Split-Path -Leaf $zip)`n",
+                               (New-Object System.Text.UTF8Encoding($false)))
 
 Step "完成"
 Write-Host "  可直接執行：$exe" -ForegroundColor Green
