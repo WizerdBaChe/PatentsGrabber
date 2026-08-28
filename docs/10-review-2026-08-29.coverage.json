@@ -1,0 +1,169 @@
+{
+  "documentType": "code-review-deep-checklist.coverage",
+  "schemaVersion": "1.0",
+  "scanId": "10-review-2026-08-29",
+  "mode": "A",
+  "completeness": "complete",
+  "scope": "Every file this round created or changed, reviewed for correctness, credential-path security, and regression against previously-accepted behaviour.",
+  "units": [
+    {
+      "id": "src/patentsgrabber/app.py",
+      "kind": "changed",
+      "disposition": "reviewed",
+      "notes": "Settings API, local-only guard, cached-pages endpoint. 5 findings."
+    },
+    {
+      "id": "src/patentsgrabber/config.py",
+      "kind": "changed",
+      "disposition": "reviewed",
+      "notes": "Credential read/write, validation, hints. 3 findings."
+    },
+    {
+      "id": "src/patentsgrabber/paths.py",
+      "kind": "new",
+      "disposition": "reviewed",
+      "notes": "Path resolution for both modes. No findings; covered by check_release.py."
+    },
+    {
+      "id": "src/patentsgrabber/service.py",
+      "kind": "changed",
+      "disposition": "reviewed",
+      "notes": "reset_ops, ops_page_png cache signal, ops_cached_pages. 1 finding."
+    },
+    {
+      "id": "src/patentsgrabber/launcher.py",
+      "kind": "new",
+      "disposition": "reviewed",
+      "notes": "Port selection, single instance, selftest, crash reporting. 1 finding."
+    },
+    {
+      "id": "src/patentsgrabber/__main__.py",
+      "kind": "new",
+      "disposition": "reviewed",
+      "notes": "Entry point. 1 blocker."
+    },
+    {
+      "id": "src/patentsgrabber/web/index.html",
+      "kind": "changed",
+      "disposition": "reviewed",
+      "notes": "Settings panel, figure rotation/layout, cache marking, tickers. 2 findings + an 11-item regression re-check of previously-accepted behaviour."
+    },
+    {
+      "id": "src/patentsgrabber/sources/epo_ops.py",
+      "kind": "changed",
+      "disposition": "reviewed",
+      "notes": "One user-facing message string. No findings."
+    },
+    {
+      "id": "packaging/patentsgrabber.spec",
+      "kind": "new",
+      "disposition": "reviewed",
+      "notes": "onedir over onefile, excludes, datas. No findings; excludes proven by check_release.py."
+    },
+    {
+      "id": "packaging/build.ps1",
+      "kind": "new",
+      "disposition": "reviewed",
+      "notes": "Gate -> build -> smoke -> zip. No findings."
+    },
+    {
+      "id": "tools/check_settings.py",
+      "kind": "new",
+      "disposition": "reviewed",
+      "notes": "Gate. Positive controls present."
+    },
+    {
+      "id": "tools/check_figures.py",
+      "kind": "new",
+      "disposition": "reviewed",
+      "notes": "Gate. Positive control present."
+    },
+    {
+      "id": "tools/check_release.py",
+      "kind": "new",
+      "disposition": "reviewed",
+      "notes": "Gate. Caught the blocker."
+    },
+    {
+      "id": "tools/check_diagrams.py",
+      "kind": "new",
+      "disposition": "reviewed",
+      "notes": "Gate. Positive control present."
+    },
+    {
+      "id": "tools/make_state_diagrams.py",
+      "kind": "new",
+      "disposition": "reviewed",
+      "notes": "Diagram generator + model geometry asserts. Positive control present."
+    },
+    {
+      "id": "tools/shoot_ui.py",
+      "kind": "new",
+      "disposition": "reviewed",
+      "notes": "Out-of-process capture. No findings."
+    },
+    {
+      "id": "tools/check_layout.py",
+      "kind": "changed",
+      "disposition": "reviewed",
+      "notes": "Added screenshot(). No findings."
+    },
+    {
+      "id": "tools/shoot.py",
+      "kind": "changed",
+      "disposition": "reviewed",
+      "notes": "Added --url. No findings."
+    },
+    {
+      "id": "tools/run_gates.py",
+      "kind": "changed",
+      "disposition": "reviewed",
+      "notes": "Registered 4 gates, allowed flags."
+    },
+    {
+      "id": "requirements.txt",
+      "kind": "changed",
+      "disposition": "reviewed",
+      "notes": "Pillow and pypdf were missing though always required — corrected."
+    },
+    {
+      "id": ".gitignore",
+      "kind": "changed",
+      "disposition": "reviewed",
+      "notes": "build/ and release/ ignored."
+    },
+    {
+      "id": "docs/07-delivery-round.md",
+      "kind": "new",
+      "disposition": "reviewed",
+      "notes": "Boundary contract."
+    },
+    {
+      "id": "docs/09-state-models.md",
+      "kind": "new",
+      "disposition": "reviewed",
+      "notes": "State models + gap report."
+    },
+    {
+      "id": "docs/diagrams/state-snapshots.html",
+      "kind": "new",
+      "disposition": "reviewed",
+      "notes": "Generated projection."
+    }
+  ],
+  "deferred": [],
+  "explicitExclusions": [
+    {
+      "id": "visual correctness of the rendered UI",
+      "reason": "No gate can see it. Routed to docs/11-uat-2026-08-29.md (26 items)."
+    },
+    {
+      "id": "EPO-side failure paths (403 quota exhausted, revoked credential)",
+      "reason": "One-off evidence only; unchanged from docs/06 section 3. Not this round's regression, and not fixable without spending a real 403."
+    },
+    {
+      "id": "non-Windows platforms",
+      "reason": "paths.data_root() has a POSIX branch nobody has run. The project is single-machine by charter."
+    }
+  ]
+}

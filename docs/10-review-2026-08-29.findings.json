@@ -1,0 +1,340 @@
+{
+  "documentType": "code-review-deep-checklist.findings",
+  "schemaVersion": "1.0",
+  "scanId": "10-review-2026-08-29",
+  "target": {
+    "type": "git_diff",
+    "id": "6483b5091d128143431f80d6dde173fc99ccd799..working-tree"
+  },
+  "findings": [
+    {
+      "findingId": "crd_b1a001",
+      "ruleId": "review.correctness.import-context",
+      "identity": {
+        "anchor": "src/patentsgrabber/__main__.py:module"
+      },
+      "fingerprint": "crd/v1:sha256:ff640b0ef90ec2a26add35febd42d862504b8986f01957aa7117f2bfef6517a8",
+      "severity": {
+        "level": "blocker",
+        "changeConditions": "downgrade to should-fix only if the packaged build is dropped from the deliverables"
+      },
+      "confidence": {
+        "level": "high",
+        "rationale": "Reproduced: the first build ran and died with ImportError; fixed and re-run green."
+      },
+      "dimension": "correctness",
+      "preExisting": false,
+      "title": "Relative import in a PyInstaller entry script",
+      "summary": "PyInstaller executes its entry script as `__main__` with no package context, so `from .launcher import run` raises ImportError at startup. The build reported success.",
+      "recommendation": "Use an absolute import. Keep tools/check_release.py in the release path — it is the only thing that executes the packaged artifact.",
+      "locations": [
+        {
+          "path": "src/patentsgrabber/__main__.py",
+          "startLine": 14,
+          "role": "primary"
+        }
+      ],
+      "evidence": "build 1 output: `ImportError: attempted relative import with no known parent package` / `[PYI-12352:ERROR] Failed to execute script '__main__'`"
+    },
+    {
+      "findingId": "crd_s1a002",
+      "ruleId": "review.security.credential-egress",
+      "identity": {
+        "anchor": "src/patentsgrabber/app.py:_probe"
+      },
+      "fingerprint": "crd/v1:sha256:7639f06a9a697627c9b82345bb82620866ba0ff23b0f377a17340740b5b40e5e",
+      "severity": {
+        "level": "should-fix",
+        "changeConditions": "upgrade to blocker if the page is ever reachable from another origin"
+      },
+      "confidence": {
+        "level": "high",
+        "rationale": "Probed config.check_value against 9 host shapes incl. suffix look-alikes; gated in tools/check_settings.py with a must-accept control."
+      },
+      "dimension": "correctness",
+      "preExisting": false,
+      "title": "OPS base URL was free text, and the credential travels to it",
+      "summary": "The consumer key and secret are sent to OPS_BASE_URL as an HTTP Basic header. A typo or a pasted hostile URL in that field exfiltrates them.",
+      "recommendation": "Constrain to epo.org and https, in ONE validator shared by the save and test paths. Cost: 20 lines. No legitimate use is lost — the field is documented as 'leave it alone'.",
+      "locations": [
+        {
+          "path": "src/patentsgrabber/config.py",
+          "startLine": 118,
+          "role": "primary"
+        },
+        {
+          "path": "src/patentsgrabber/app.py",
+          "startLine": 262,
+          "role": "secondary"
+        }
+      ],
+      "evidence": "check_settings.py: `a host outside epo.org refused HTTP 400`, `CONTROL: another epo.org path IS accepted HTTP 200`"
+    },
+    {
+      "findingId": "crd_s2a003",
+      "ruleId": "review.security.injection",
+      "identity": {
+        "anchor": "src/patentsgrabber/config.py:write_settings"
+      },
+      "fingerprint": "crd/v1:sha256:47553ef825705569c1154cad46a7f718b659ff96bd6028456502222145d470b1",
+      "severity": {
+        "level": "should-fix",
+        "changeConditions": "upgrade to blocker if a non-user actor can reach POST /api/settings"
+      },
+      "confidence": {
+        "level": "high",
+        "rationale": "Gated: a value containing a newline is refused and nothing lands in the file."
+      },
+      "dimension": "correctness",
+      "preExisting": false,
+      "title": "A newline in a value writes a second setting",
+      "summary": "The settings file is one KEY=value per line. A value carrying \\n injects a setting nobody asked for — reachable from the panel's own text fields.",
+      "recommendation": "Reject control characters at the API boundary; validate every value before writing any.",
+      "locations": [
+        {
+          "path": "src/patentsgrabber/config.py",
+          "startLine": 130,
+          "role": "primary"
+        }
+      ],
+      "evidence": "check_settings.py: `newline in a value refused HTTP 400`, `nothing was injected into the file`"
+    },
+    {
+      "findingId": "crd_s3a004",
+      "ruleId": "review.state.stale-read",
+      "identity": {
+        "anchor": "src/patentsgrabber/app.py:_settings_state"
+      },
+      "fingerprint": "crd/v1:sha256:620c06b7dc7fa4f0d848d779a4d2630be54a029188707a06bc658c749b38a4ea",
+      "severity": {
+        "level": "should-fix",
+        "changeConditions": "downgrade to consider if hand-editing the file is declared unsupported"
+      },
+      "confidence": {
+        "level": "high",
+        "rationale": "Reproduced in the gate: edit the file, the panel showed the new hint while `configured` and the OPS client still came from the boot-time environment."
+      },
+      "dimension": "correctness",
+      "preExisting": false,
+      "title": "The panel re-read the file but not the engine",
+      "summary": "Two answers to one question: the hint came from the file, `configured` and the live OPS client from os.environ as loaded at startup.",
+      "recommendation": "_sync_from_file() re-loads and resets the client, and reports adopted_file_change so the switch is visible rather than silent.",
+      "locations": [
+        {
+          "path": "src/patentsgrabber/app.py",
+          "startLine": 205,
+          "role": "primary"
+        }
+      ],
+      "evidence": "check_settings.py: `the panel shows the hand-edited key`, `and says it adopted a change rather than doing it silently`"
+    },
+    {
+      "findingId": "crd_s4a005",
+      "ruleId": "review.correctness.lifecycle",
+      "identity": {
+        "anchor": "src/patentsgrabber/service.py:reset_ops"
+      },
+      "fingerprint": "crd/v1:sha256:19821833e9c4c5c69cd93ce19adc34d188071baaf7622627f206dd6b6a817b3d",
+      "severity": {
+        "level": "should-fix",
+        "changeConditions": "downgrade to consider if endpoints ever become single-threaded"
+      },
+      "confidence": {
+        "level": "medium",
+        "rationale": "Reasoned from FastAPI's threadpool execution of sync endpoints; not reproduced (needs a save concurrent with an in-flight sheet fetch)."
+      },
+      "dimension": "correctness",
+      "preExisting": false,
+      "title": "Closing an OPS client that another thread is using",
+      "summary": "reset_ops closed the old httpx client. A drawing sheet in flight on it fails with 'Cannot send a request, as the client has been closed' — a 502 caused by an unrelated settings save.",
+      "recommendation": "Retire rather than close; close all retired clients in Service.close(). A session saves settings a handful of times, so the held sockets are not a leak worth that risk.",
+      "locations": [
+        {
+          "path": "src/patentsgrabber/service.py",
+          "startLine": 160,
+          "role": "primary"
+        }
+      ],
+      "evidence": "FastAPI runs `def` endpoints in a threadpool; api_settings_post and api_ops_page can overlap. httpx.Client.close() is not safe against a concurrent send."
+    },
+    {
+      "findingId": "crd_s5a006",
+      "ruleId": "review.correctness.error-message",
+      "identity": {
+        "anchor": "src/patentsgrabber/launcher.py:choose_port"
+      },
+      "fingerprint": "crd/v1:sha256:1227d603c3d0bf5e55d3e03e69bb3169a178a312513a8afb559b7e616ef084c5",
+      "severity": {
+        "level": "should-fix",
+        "changeConditions": "downgrade to nit if PORT is documented as developer-only"
+      },
+      "confidence": {
+        "level": "high",
+        "rationale": "Traced: PORT set + port occupied by a stranger returned (port, None) and let uvicorn fail with a traceback."
+      },
+      "dimension": "completeness",
+      "preExisting": false,
+      "title": "A pinned PORT was not probed before use",
+      "summary": "The env override returned its port unexamined, so a second launch on a pinned port tried to bind an occupied socket and crashed instead of standing down.",
+      "recommendation": "Probe the pinned port the same way as the scanned ones; raise a sentence when it is occupied by something else.",
+      "locations": [
+        {
+          "path": "src/patentsgrabber/launcher.py",
+          "startLine": 70,
+          "role": "primary"
+        }
+      ],
+      "evidence": "check_release.py drives exactly this path: `the second copy stood down`"
+    },
+    {
+      "findingId": "crd_s6a007",
+      "ruleId": "review.correctness.parsing",
+      "identity": {
+        "anchor": "src/patentsgrabber/app.py:_host_is_local"
+      },
+      "fingerprint": "crd/v1:sha256:048444aa06f444b33ad132a8263c1222fb7fa9fdf4f7febe4c5305d249bdeed2",
+      "severity": {
+        "level": "should-fix",
+        "changeConditions": "upgrade to blocker if the server ever binds ::1"
+      },
+      "confidence": {
+        "level": "high",
+        "rationale": "Counted colons by hand against both forms: '[::1]:8000'.count(':') == 4."
+      },
+      "dimension": "correctness",
+      "preExisting": false,
+      "title": "Colon-counting mis-parses a bracketed IPv6 host",
+      "summary": "`[::1]:8000` was judged non-local and would be refused with 421. Unreachable today (IPv4-only bind) and a silent lockout the day that changes.",
+      "recommendation": "Parse the bracketed form explicitly. Also dropped 0.0.0.0 from the allow list — no client sends it as a Host.",
+      "locations": [
+        {
+          "path": "src/patentsgrabber/app.py",
+          "startLine": 68,
+          "role": "primary"
+        }
+      ],
+      "evidence": "LOCAL_HOSTS membership test on the un-split '[::1]:8000'"
+    },
+    {
+      "findingId": "crd_c1a008",
+      "ruleId": "review.smell.rebuild-cost",
+      "identity": {
+        "anchor": "src/patentsgrabber/web/index.html:figStrip"
+      },
+      "fingerprint": "crd/v1:sha256:64eca0c8d4c6759a9dc68ef1a1439eb01761a5f5cce507876539720480070950",
+      "severity": {
+        "level": "consider",
+        "changeConditions": "upgrade to should-fix if a document with >40 sheets becomes common"
+      },
+      "confidence": {
+        "level": "high",
+        "rationale": "Read the code path: big.onload calls figStrip(), which replaces innerHTML."
+      },
+      "dimension": "readability",
+      "preExisting": false,
+      "title": "The page strip is rebuilt whole on every OPS page load",
+      "summary": "Rebuilding re-applies the current-page class correctly but loses the strip's horizontal scroll position on long documents.",
+      "recommendation": "Leave it. The rebuild is how 'this sheet is now paid for' gets drawn; a diffing update costs more complexity than one lost scroll position is worth.",
+      "locations": [
+        {
+          "path": "src/patentsgrabber/web/index.html",
+          "startLine": 861,
+          "role": "primary"
+        }
+      ],
+      "evidence": "figStrip() sets innerHTML; scrollIntoView state is not restored afterwards"
+    },
+    {
+      "findingId": "crd_c2a009",
+      "ruleId": "review.security.information-disclosure",
+      "identity": {
+        "anchor": "src/patentsgrabber/config.py:hint"
+      },
+      "fingerprint": "crd/v1:sha256:00e13a644ba5db7f6be7fa3b16edb29026885997ab6e48f85a0bd669dd9f8a07",
+      "severity": {
+        "level": "consider",
+        "changeConditions": "downgrade to nit — real OPS keys are 24-48 chars, so the branch is unreachable in practice"
+      },
+      "confidence": {
+        "level": "high",
+        "rationale": "Arithmetic: a 7-character value showed 4 of its characters."
+      },
+      "dimension": "correctness",
+      "preExisting": false,
+      "title": "The hint exposed over half of a short value",
+      "summary": "The old threshold (<=6) let a 7-character value show 4 characters.",
+      "recommendation": "Raise to 12 and say 'much shorter than an OPS key, possibly pasted wrong' — which is the more useful answer for a short value anyway.",
+      "locations": [
+        {
+          "path": "src/patentsgrabber/config.py",
+          "startLine": 87,
+          "role": "primary"
+        }
+      ],
+      "evidence": "hint('1234567') previously returned '7 字元 · 結尾 …4567'"
+    },
+    {
+      "findingId": "crd_c3a010",
+      "ruleId": "review.doc.comment-drift",
+      "identity": {
+        "anchor": "src/patentsgrabber/app.py:api_ops_page"
+      },
+      "fingerprint": "crd/v1:sha256:0f71d3259b938a598f24089043dcc351667934f3e8c8610497cbfc80092b02ba",
+      "severity": {
+        "level": "consider",
+        "changeConditions": "n/a — documentation only"
+      },
+      "confidence": {
+        "level": "high",
+        "rationale": "An <img> load exposes no response headers to script; verified against the page, which reads /api/ops/cached-pages instead."
+      },
+      "dimension": "maintainability",
+      "preExisting": false,
+      "title": "A docstring claimed the page reads a header it cannot read",
+      "summary": "X-Page-Source is useful for curl and the network panel, not for the page.",
+      "recommendation": "Say what it is actually for, and name what the page really asks.",
+      "locations": [
+        {
+          "path": "src/patentsgrabber/app.py",
+          "startLine": 156,
+          "role": "primary"
+        }
+      ],
+      "evidence": "The strip's source of truth is loadCachedPages() -> /api/ops/cached-pages"
+    },
+    {
+      "findingId": "crd_c4a011",
+      "ruleId": "review.state.silent-wait",
+      "identity": {
+        "anchor": "src/patentsgrabber/web/index.html:settingsPost"
+      },
+      "fingerprint": "crd/v1:sha256:16837786c5da8d85d5c3fba35efa3c3c76cdd94b0b5dafd41e233b1fb0f297b9",
+      "severity": {
+        "level": "consider",
+        "changeConditions": "upgrade to should-fix — it is a stated project rule, not a preference"
+      },
+      "confidence": {
+        "level": "high",
+        "rationale": "Compared against CLAUDE.md's 'no silent waiting' ruling (2026-08-26) and against busyOn(), which already had an elapsed counter."
+      },
+      "dimension": "completeness",
+      "preExisting": false,
+      "title": "Two new waits said what, not how long",
+      "summary": "The settings POST and the EPO sheet fetch each showed a static message. The project's own rule requires elapsed time so a slow source and a hung one look different.",
+      "recommendation": "One ticker() shared by both, plus a 60 s AbortController on the POST so a hung request cannot leave the buttons disabled forever.",
+      "locations": [
+        {
+          "path": "src/patentsgrabber/web/index.html",
+          "startLine": 424,
+          "role": "primary"
+        },
+        {
+          "path": "src/patentsgrabber/web/index.html",
+          "startLine": 906,
+          "role": "secondary"
+        }
+      ],
+      "evidence": "CLAUDE.md: 'Anything taking more than ~300 ms says what it is waiting for and how long it has been waiting.'"
+    }
+  ]
+}
