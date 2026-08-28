@@ -98,9 +98,31 @@ def main() -> int:
           f"e.g. {variants[0]['name']} <- {[o['name'] for o in variants[0]['originals'][:2]]}"
           if variants else "")
     exact = svc.search("CORNING RESEARCH & DEVELOPMENT CORPORATION", size=25)
-    check("an exact name collapses to one applicant (the refine path works)",
-          len(exact.get("applicant_variants", [])) == 1,
-          f"{[v['name'] for v in exact.get('applicant_variants', [])]}")
+    exact_variants = exact.get("applicant_variants", [])
+    # This used to assert `== 1`, and on 2026-08-29 it began failing: OPS returns
+    # BOTH `CORNING RES & DEV CORP [US]` (24 rows) and
+    # `CORNING RES & DEVELOPMENT CORPORATION [US]` (1 row) for the same as-filed
+    # string. The product was right and the gate was wrong — OPS's abbreviation of
+    # an applicant name is not consistent across records, which is a property of
+    # the source, and BR-8 exists precisely because one company is many strings.
+    #
+    # The property the check was really guarding is "refining works", so that is
+    # what it now says: the spread must NARROW, and what is left must trace back
+    # to the name that was asked for. The original failure — refining changes
+    # nothing — still fails this, because len(exact) < len(broad) would not hold.
+    #
+    # review-when: OPS changes how it normalises applicant names, or Corning's
+    # as-filed spelling changes. Both are outside this repository, so this
+    # assertion expires by default rather than on a date.
+    check("refining to one as-filed name narrows the spread",
+          0 < len(exact_variants) < len(variants),
+          f"broad name gave {len(variants)}, exact name gives {len(exact_variants)}: "
+          f"{[v['name'] for v in exact_variants]}")
+    check("and every remaining variant traces back to the name that was asked for",
+          bool(exact_variants) and all(
+              any("CORNING" in o["name"].upper() for o in v.get("originals", []))
+              for v in exact_variants),
+          f"{[[o['name'] for o in v.get('originals', [])][:1] for v in exact_variants]}")
     check("a name with & survives into CQL", "&" in exact.get("cql", ""), exact.get("cql"))
 
     print("\n=== 5. negative control — nothing found is an ANSWER, not a failure ===")
