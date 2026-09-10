@@ -42,8 +42,22 @@ def _now() -> str:
 class Store:
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(path, check_same_thread=False)
+        # Two processes can now hold this file: the server started by run.py and
+        # the CLI an agent calls. Under the default rollback journal a writer
+        # locks the whole database, so the second one fails with "database is
+        # locked" — a lookup that worked all day breaking because a window was
+        # open. WAL lets a reader and a writer coexist; the timeout covers the
+        # remaining case of two writers landing together, which at this scale
+        # means waiting milliseconds rather than failing.
+        #
+        # Both settings are attempted, not asserted: WAL needs a local
+        # filesystem, and a data directory on a network share would refuse it.
+        # `pgb doctor` prints the mode actually in force, so a fallback is
+        # visible instead of a surprise under load.
+        self.conn = sqlite3.connect(path, check_same_thread=False, timeout=15.0)
         self.conn.row_factory = sqlite3.Row
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA busy_timeout=15000")
         self.conn.executescript(SCHEMA)
         self.conn.commit()
 
