@@ -25,7 +25,7 @@ from . import config, paths
 from .service import ResolveError, Service
 from .sources import epo_ops as ops
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 paths.ensure_data_dirs()
 WEB = paths.web_dir()

@@ -37,6 +37,11 @@ python run.py
 **開放來源拿不到的圖，這裡拿得到**——Google Patents 只對它收錄過的案子提供圖檔，
 而它比 EPO 慢好幾個月；`pgb figures` 讀的是 EPO 自己的掃描頁。
 
+**這一面只存在於原始碼版，打包出來的 zip 裡沒有 `pgb.exe`。** 這不是還沒做，是刻意的：
+呼叫端是同一台機器上的 agent，它要讀的是**這個 checkout 的**專利庫與圖式快取
+（`~/.claude/skills/patents-grabber/SKILL.md` 裡寫死的就是這個路徑）；打包版把資料放在
+`%LOCALAPPDATA%`，等於另一個庫。要在打包版上開這一面，得先決定那是誰的庫，那是另一輪的事。
+
 ```powershell
 python pgb.py doctor --json
 python pgb.py lookup US20250383260A1 --json          # 精簡卡片（不含全文）
