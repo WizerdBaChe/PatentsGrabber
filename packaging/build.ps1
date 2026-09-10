@@ -62,15 +62,25 @@ if ($Clean) {
 
 # ---------------------------------------------------------------- 打包
 Step "PyInstaller（第一次大約 1-3 分鐘）"
-# PyInstaller 把 INFO 寫到 stderr。讓它流回 PowerShell 會被包成 NativeCommandError，
-# 看起來像壞了其實沒事，所以整份導到記錄檔，只在失敗時印出來。
-$buildLog = Join-Path $root "build\pyinstaller.log"
+# PyInstaller 把 INFO 寫到 stderr。**不要用 `*>` 把它導進檔案。** 在 PS 5.1 裡，
+# 原生指令的 stderr 一經 PowerShell 的重導向就會被包成 NativeCommandError，
+# 量一大就會把整條管線打斷：實測 2026-09-11，PyInstaller 自己 exit 0、
+# 直接跑得出完整的 dist，透過 `*>` 卻拿到 exit 1，而記錄檔停在 hook-PIL.Image
+# 中途、連一行錯誤訊息都沒有（而且是 UTF-16，`grep` 也讀不出東西）。
+# 一個「回報失敗卻沒有失敗原因」的建置步驟比沒有記錄還糟。
+#
+# Start-Process 的重導向由作業系統做，不經過 PowerShell 的錯誤流，所以兩件事都對：
+# 拿得到真的離開碼，記錄檔也是原樣的位元組。stdout / stderr 必須是不同檔案。
+$buildLog = Join-Path $root "build\pyinstaller.log"      # stderr — INFO 與錯誤都在這
+$buildOut = Join-Path $root "build\pyinstaller.out.log"  # stdout — 通常是空的
 New-Item -ItemType Directory -Force -Path (Join-Path $root "build") | Out-Null
 $sw = [Diagnostics.Stopwatch]::StartNew()
-& python -m PyInstaller --noconfirm --clean `
-    --distpath build\dist --workpath build\work `
-    packaging\patentsgrabber.spec *> $buildLog
-$code = $LASTEXITCODE
+$proc = Start-Process -FilePath "python" -NoNewWindow -Wait -PassThru `
+    -ArgumentList @("-m", "PyInstaller", "--noconfirm", "--clean",
+                    "--distpath", "build\dist", "--workpath", "build\work",
+                    "packaging\patentsgrabber.spec") `
+    -RedirectStandardOutput $buildOut -RedirectStandardError $buildLog
+$code = $proc.ExitCode
 $sw.Stop()
 
 if ($code -ne 0) {
