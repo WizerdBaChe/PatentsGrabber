@@ -41,6 +41,8 @@ GATES = [
      "the drawing pane's geometry under rotation, fit and zoom (Chrome, no network)"),
     ("tools/check_settings.py", "local", "one line per CHECK",
      "settings round-trip, no credential in any response, the local-only guard"),
+    ("tools/check_cli.py", "local", "one line per CHECK",
+     "the agent-facing CLI: stream split, lean default, no credential, opt-in spend"),
     ("tools/check_secrets.py --tracked", "local", "one line per TRACKED FILE",
      "no tracked file in this repository contains a credential"),
     ("tools/make_state_diagrams.py --check", "local", "one line per CHECK",
