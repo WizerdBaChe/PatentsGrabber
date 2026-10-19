@@ -3,6 +3,7 @@
 # This block exists before the repo did: .gitignore was written and git init run
 # BEFORE any credential file was created, so no key was ever committable.
 # ---------------------------------------------------------------------------
+# class: secret
 .env
 .env.*
 !.env.example
@@ -16,22 +17,26 @@ token.json
 # ---------------------------------------------------------------------------
 # Local data and run artifacts (regenerable; see tools/probe_coverage.py)
 # ---------------------------------------------------------------------------
+# class: regenerable
 var/
 
 # ---------------------------------------------------------------------------
 # Build output. Regenerable from packaging/build.ps1, and large: a 50 MB zip in
 # git history is 50 MB in every clone forever. Releases carry the binary instead.
 # ---------------------------------------------------------------------------
+# class: regenerable
 build/
 release/
 
 # Superseded files are moved here, never deleted (archive/WHY.md says why each
 # one moved). Kept out of the repository: it is a local record, not content.
+# class: retired
 archive/
 
 # ---------------------------------------------------------------------------
 # Python
 # ---------------------------------------------------------------------------
+# class: regenerable
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -42,8 +47,10 @@ venv/
 # ---------------------------------------------------------------------------
 # OS / editor noise
 # ---------------------------------------------------------------------------
+# class: regenerable
 Thumbs.db
 desktop.ini
 .DS_Store
+# class undetermined: editor folders mix hand-written settings with generated state
 .vscode/
 .idea/
